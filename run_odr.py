@@ -8,10 +8,13 @@ import os
 import uvicorn
 
 if __name__ == "__main__":
+    host = os.getenv("ODR_HOST", "127.0.0.1")
+    port = int(os.getenv("ODR_PORT", "8000"))
+
     print("=" * 60)
     print("Starting ODR (Optical Diagram Recognition) Server...")
-    print("Local Backend: http://127.0.0.1:8000")
-    print("API Documentation: http://127.0.0.1:8000/docs")
+    print(f"Local Backend: http://{host}:{port}")
+    print(f"API Documentation: http://{host}:{port}/docs")
     print("Local-first: All CV and OCR inference is 100% offline.")
     print("=" * 60)
 
@@ -20,4 +23,4 @@ if __name__ == "__main__":
     if current_dir not in sys.path:
         sys.path.insert(0, current_dir)
 
-    uvicorn.run("backend.main:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("backend.main:app", host=host, port=port, reload=False)

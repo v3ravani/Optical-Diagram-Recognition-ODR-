@@ -46,10 +46,13 @@ app = FastAPI(
     description="Local-first diagram recognition, editing, and export engine."
 )
 
-# Enable CORS for localhost development
+# Enable CORS for local development
+cors_origins_raw = os.getenv("ODR_CORS_ORIGINS", "*")
+cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()] if cors_origins_raw != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
