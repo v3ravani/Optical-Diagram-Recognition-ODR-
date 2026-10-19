@@ -92,15 +92,22 @@ class RegionDetector:
     @classmethod
     def _infer_diagram_type(cls, crop: np.ndarray) -> Tuple[DiagramFamily, str]:
         """
-        Quick heuristic to detect if a region looks like a Flowchart vs Bar Chart vs Pie Chart.
+        Infers whether a region looks like a Flowchart vs Bar Chart vs Pie Chart.
         """
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
         
-        # Check for circular shapes (pie chart indicator)
+        # Check for circular shapes (pie chart indicator - requires strict param2=80)
+        min_dim = min(crop.shape[:2])
         circles = cv2.HoughCircles(
-            gray, cv2.HOUGH_GRADIENT, dp=1.2, minDist=min(crop.shape[:2]) // 2,
-            param1=100, param2=40, minRadius=int(min(crop.shape[:2]) * 0.2), maxRadius=int(min(crop.shape[:2]) * 0.48)
+            gray,
+            cv2.HOUGH_GRADIENT,
+            dp=1.2,
+            minDist=min_dim // 2,
+            param1=120,
+            param2=80,
+            minRadius=int(min_dim * 0.25),
+            maxRadius=int(min_dim * 0.48)
         )
         if circles is not None and len(circles[0]) >= 1:
             return DiagramFamily.CHART, "pie_chart"

@@ -64,7 +64,7 @@
 ---
 
 ### Tests & Verification
-- **Backend Tests**: 8/8 passing via `python -m pytest backend/tests/test_odr_pipeline.py -v`.
+- **Backend Tests**: 11/11 passing via `python -m pytest backend/tests/ -v`.
 - **Frontend Build**: `tsc -b && vite build` completed in 1.93s with 0 errors.
 
 ---
@@ -72,3 +72,4 @@
 ### Commit History
 - `83885d3`: `chore: initial repository configuration`
 - `cbe78bf`: `feat: implement backend pipeline, canonical models, and exporters`
+- `2264cda`: `feat: implement interactive canvas editor, review workspace, and export modals`

@@ -1,0 +1,1488 @@
+# ODR — Optical Diagram Recognition
+## Product Requirements Document (PRD)
+### Version 2.0 — Accuracy-First, Local-First Diagram Workbench
+
+**Status:** Detailed product and implementation specification  
+**Product category:** Local-first diagram recognition, reconstruction, editing, and export  
+**Primary promise:** Convert diagram images and documents into accurate, editable digital diagrams while keeping recognition local.  
+**Primary interface:** A polished desktop-oriented web application that can later be packaged as a desktop app.
+
+---
+
+# 1. Executive Summary
+
+ODR (Optical Diagram Recognition) converts diagrams from photographs, scans, screenshots, printed pages, and hand-drawn images into structured digital diagrams. It supports pages containing multiple diagrams and lets users select exactly which diagrams to convert. After recognition, users can inspect and correct the result in a visual editor with drag-and-drop interaction similar to online diagram editors.
+
+ODR is not simply OCR and must not be merely a wrapper around a vision-language model. Its core pipeline combines local image preprocessing, OCR, computer vision, locally runnable recognition models, diagram-specific reconstruction algorithms, structural validation, a canonical diagram model, interactive editing, and format-specific exporters.
+
+The product is accuracy-first. A diagram that looks polished but contains the wrong connector, label, chart value, or relationship is incorrect. ODR must expose uncertainty, preserve source evidence, enable corrections, and validate exports before users rely on them.
+
+## 1.1 Product vision
+
+> Make diagrams in the real world editable, reusable, and portable—without requiring cloud AI services.
+
+## 1.2 Key differentiators
+
+1. Local processing and privacy-first operation.
+2. Recognition of hand-drawn and printed diagrams.
+3. Detection and selection of multiple diagrams in one image or document.
+4. Type-aware recognition for flowcharts, charts, UML, networks, ER diagrams, and additional families.
+5. A real visual editor—not just generated source code—with drag-and-drop, connection editing, resizing, alignment, and undo/redo.
+6. Version history and recovery of earlier recognition and editing states.
+7. Mermaid, PlantUML, structured JSON, and PNG exports when semantically supported.
+8. Accuracy measured by diagram family and structural correctness, not a vague single “AI accuracy” score.
+
+---
+
+# 2. Product Principles
+
+## 2.1 Accuracy over appearance
+
+Structural fidelity is the highest priority. A clean-looking diagram with an incorrect arrow or relationship is a failed result. Visual styling may be improved only after the structure is credible.
+
+## 2.2 Local by default
+
+Core recognition, review, editing, history, rendering, and export must run locally after installation and model setup. No external AI inference API, cloud upload, mandatory account, or cloud sync.
+
+## 2.3 One canonical source of truth
+
+Recognition creates a canonical, type-aware diagram model. The editor edits that model. Mermaid, PlantUML, JSON, and PNG outputs are derived from it. The application must not maintain unrelated versions of the diagram for each output format.
+
+## 2.4 Human-in-the-loop accuracy
+
+The system should identify uncertain labels, nodes, connectors, arrow directions, and values. Users must be able to correct them visually. ODR should not hide uncertainty behind an apparently confident output.
+
+## 2.5 History and reversibility
+
+Recognition and editing can be imperfect. Every meaningful user edit should be undoable, and users should be able to inspect and restore prior saved versions.
+
+## 2.6 Extensible diagram support
+
+Each diagram family has its own semantics. A bar chart is not just a graph of generic nodes; a sequence diagram is not a flowchart. The architecture must allow type-specific recognition, validation, editing, and export.
+
+## 2.7 Honest compatibility
+
+Mermaid and PlantUML cannot represent every diagram type or every visual feature. Export availability must be based on actual support. Unsupported or lossy constructs must be reported.
+
+---
+
+# 3. Problem Statement
+
+People frequently have diagrams trapped in paper notes, textbooks, screenshots, PDFs, reports, or whiteboards. They need to edit these diagrams, reproduce them in documentation, version-control their source, or export them into another tool.
+
+Traditional OCR extracts text but not complete diagram structure. Generic AI-based conversion can misread arrows, invent missing connections, overlook small elements, confuse chart values, or require sensitive image uploads. Existing drawing editors usually expect users to recreate the diagram manually.
+
+ODR aims to reduce manual recreation by extracting structure locally, exposing uncertain results, and offering a visual editing experience that makes correction practical.
+
+---
+
+# 4. Target Users and Primary Jobs
+
+## 4.1 Target users
+
+- Students converting handwritten notes, algorithms, and lab diagrams.
+- Software developers converting flowcharts, UML diagrams, and architecture sketches.
+- Researchers converting figures from papers and scanned documents.
+- Engineers documenting networks, systems, and technical processes.
+- Analysts reconstructing charts and graphs.
+- Technical writers who need editable, version-controlled diagrams.
+- Privacy-conscious users who cannot upload diagrams to cloud AI services.
+
+## 4.2 Core user jobs
+
+- “I have a photo of a flowchart. Turn it into an editable diagram.”
+- “This page contains five diagrams. Let me choose the two I need.”
+- “The conversion got one arrow wrong. Let me fix it visually.”
+- “I want to move and resize nodes without editing Mermaid code.”
+- “I need the same diagram as Mermaid, PlantUML, JSON, and PNG where possible.”
+- “I changed the diagram yesterday and want to restore the earlier version.”
+- “I want to use this without sending the image to an external service.”
+- “The model is uncertain. Show me exactly what needs review.”
+
+---
+
+# 5. Scope and Capability Tiers
+
+## 5.1 Important scope rule
+
+“All input formats” means broad documented file compatibility. “All diagram types” means an extensible system with a growing set of tested diagram families—not a claim that every arbitrary image can be perfectly understood.
+
+## 5.2 Diagram support tiers
+
+### Tier 1 — MVP quality gate
+- Flowcharts.
+- Decision trees.
+- Basic process/block diagrams.
+- Basic network diagrams.
+- Bar charts.
+- Pie charts.
+- Simple line charts and plotted graphs.
+
+### Tier 2 — After the core pipeline is reliable
+- UML sequence diagrams.
+- UML class diagrams.
+- UML activity and state-machine diagrams.
+- Entity-relationship diagrams.
+- Organization charts.
+- Mind maps.
+- Data-flow diagrams.
+- Timelines and basic Gantt-like diagrams.
+
+### Tier 3 — Advanced / research scope
+- Dense scientific diagrams.
+- Circuit and mechanical schematics with specialized symbol vocabularies.
+- P&ID diagrams.
+- Complex multi-panel figures.
+- Arbitrary whiteboard drawings and mixed technical illustrations.
+
+The UI may detect and label a type outside Tier 1, but it must distinguish “detected,” “partially supported,” and “fully supported.” Detection must not imply that accurate conversion is available.
+
+---
+
+# 6. Supported Inputs
+
+## 6.1 Image formats
+
+Required initial formats:
+- PNG.
+- JPEG / JPG.
+- WebP.
+- BMP where decoder support is reliable.
+
+Potential additions:
+- TIFF, including multi-page TIFF.
+- HEIC/HEIF when a compatible local decoder is available.
+- GIF as a selected still frame; animated recognition is not part of the MVP.
+- SVG input where vector content can be safely parsed or rasterized locally.
+
+## 6.2 Documents and import methods
+
+- PDF, including multi-page documents.
+- Multiple files in one import batch.
+- Drag-and-drop from the file manager.
+- File picker.
+- Clipboard paste where browser/platform permissions allow.
+- Image pasted from supported applications.
+- Optional later support for importing folders.
+
+## 6.3 Input conditions to test
+
+- Printed diagrams and clean exports.
+- Hand-drawn diagrams with varying line quality.
+- Phone photographs with perspective distortion.
+- Rotated and skewed pages.
+- Low contrast and uneven lighting.
+- Mild blur, shadows, paper texture, and notebook lines.
+- Multiple diagrams on a single page.
+- Diagram mixed with paragraphs or tables.
+- Crossing connectors, broken lines, arrowheads touching shapes, and partially obscured labels.
+- Small diagrams embedded in high-resolution pages.
+
+ODR must not promise reliable recovery from unreadable or missing information. It should flag low-quality input and offer image correction, manual cropping, or manual edits.
+
+## 6.4 Input validation and security
+
+- Inspect file content and actual format, not only extension.
+- Set configurable file-size, page-count, and image-dimension limits.
+- Reject corrupt files safely.
+- Avoid executing embedded scripts or active content.
+- Preserve original files unchanged.
+- Never include raw image content in logs.
+- Show the user why an input is rejected and how to fix it.
+
+---
+
+# 7. End-to-End Workflow
+
+## Step 1 — Start a project
+
+The user opens ODR and chooses “New project” or opens a recent local project. The interface displays a clear local-processing indicator.
+
+## Step 2 — Import
+
+The user adds one or more images or PDFs. ODR shows thumbnails, file names, page counts, dimensions, and import errors.
+
+## Step 3 — Preprocess and detect
+
+ODR corrects orientation where appropriate, prepares page previews, and detects candidate diagram regions. The system shows numbered outlines over the source page.
+
+## Step 4 — Choose diagrams
+
+When multiple candidates exist, users can select one, several, or all. They can rename candidates, change suggested types, adjust region boundaries, split or merge regions where feasible, mark false detections, or draw a missing region manually.
+
+## Step 5 — Recognize
+
+ODR processes the selected regions with type-specific local pipelines. Progress messages must correspond to real stages.
+
+## Step 6 — Review
+
+The user compares the source with the reconstructed result. Uncertain or suspicious elements are highlighted. The user corrects the model visually.
+
+## Step 7 — Edit the diagram
+
+The user can drag nodes, add or remove shapes, resize elements, reconnect edges, edit labels, align objects, adjust layout, and change supported styling. Edits update the canonical model.
+
+## Step 8 — Validate
+
+ODR validates structural consistency, type-specific constraints, and export syntax. Warnings are visible and actionable.
+
+## Step 9 — Export
+
+The user selects available formats and downloads individual files or a ZIP bundle. Export warnings explain unsupported or lossy features.
+
+## Step 10 — Save and revisit
+
+The project and version history remain on the user's device according to local project settings. The user can compare, restore, rename, duplicate, or delete versions.
+
+---
+
+# 8. UI/UX Vision
+
+## 8.1 Design personality
+
+ODR should feel like a mature technical editor: precise, calm, spacious, and trustworthy. It must not look like a generic AI chat product, an analytics dashboard, or an over-decorated template.
+
+### Visual system
+- Warm white or neutral light background.
+- Charcoal text.
+- Muted forest green or restrained teal as the primary accent.
+- Light neutral borders and surfaces.
+- Clear typographic hierarchy.
+- Consistent iconography.
+- Subtle shadows only where they clarify layering.
+- Restrained motion.
+- No purple-heavy palette.
+- No excessive gradients, decorative blobs, fake statistics, or unnecessary cards.
+- Diagram canvas should dominate the workspace.
+
+### Dark theme
+Dark theme may be added after the light theme is well designed. If supported, it must preserve clear selection, edge, warning, and confidence states.
+
+### Accessibility
+- Keyboard navigation.
+- Visible focus.
+- Screen-reader labels.
+- Text labels alongside status icons.
+- Sufficient contrast.
+- Reduced-motion support.
+- Keyboard alternatives for all drag operations.
+- Zoom-friendly and resizable panels.
+
+---
+
+# 9. Information Architecture
+
+Recommended main navigation:
+
+1. **Workspace** — current project and import.
+2. **Projects** — local saved projects.
+3. **History** — recent projects and version history.
+4. **Settings** — models, performance, privacy, defaults.
+5. **Help** — shortcuts, supported types, limitations, troubleshooting.
+
+Within a project:
+- Source files.
+- Detected diagrams.
+- Recognition review.
+- Diagram editor.
+- Validation issues.
+- Exports.
+- Version history.
+
+Avoid creating too many permanent navigation items. Keep the main editing surface uncluttered.
+
+---
+
+# 10. Detailed UI Screens
+
+## 10.1 Welcome / empty state
+
+Purpose: help the user start without explaining the entire system at once.
+
+Elements:
+- ODR logo and name.
+- Short statement: “Turn diagram images into editable diagrams.”
+- Primary button: **Import images or PDF**.
+- Drag-and-drop area.
+- Secondary action: Paste image.
+- Supported file formats.
+- Local-processing status.
+- Recent projects list if any exist.
+- “Try sample project” using a bundled, clearly labelled local sample.
+
+Do not show fake activity, fake user counts, or a chat box as the primary interface.
+
+## 10.2 Project dashboard
+
+Each project row/card shows:
+- Project name.
+- Thumbnail of the latest diagram.
+- Number of source files and recognized diagrams.
+- Last modified time.
+- Last export status if available.
+- Actions: open, rename, duplicate, reveal in file manager, delete.
+
+Provide search and sort by name, modified date, and creation date. Deletion should be confirmed and explain whether source files are copied into the project or only referenced.
+
+## 10.3 Import queue
+
+For each file:
+- Thumbnail or file icon.
+- File name.
+- Dimensions / PDF page count.
+- File size.
+- Import status.
+- Warning state.
+- Remove action.
+
+Controls:
+- Add more.
+- Clear queue.
+- Reorder files where relevant.
+- Start detection.
+
+The queue should preserve valid files if one file fails. A single bad file must not cancel the entire batch.
+
+## 10.4 Detection and diagram selection screen
+
+This is a critical screen.
+
+### Main layout
+- Large source page preview.
+- Numbered region outlines.
+- Candidate list with thumbnail, suggested type, and status.
+- Select all / clear all.
+- Edit crop boundary.
+- Add region manually.
+- Split or merge regions when supported.
+- Rename candidate.
+- Change type.
+- Mark “not a diagram.”
+- Primary button: “Recognize selected.”
+
+### Region behavior
+- Clicking a candidate highlights its region.
+- Clicking a region selects its list entry.
+- Overlapping regions must be distinguishable.
+- Region boundaries can be resized and moved.
+- If no regions are detected, offer manual crop rather than a dead end.
+- Detection confidence should not be presented as a guaranteed correctness score.
+
+## 10.5 Recognition progress
+
+Show actual processing stages:
+1. Preparing image.
+2. Detecting text and elements.
+3. Reconstructing connections or data.
+4. Checking consistency.
+5. Building editable preview.
+
+Requirements:
+- Do not fabricate percentage progress.
+- Allow cancellation when safe.
+- Preserve the original input.
+- Explain if a local model is missing or needs initial setup.
+- Explain memory or resource failures.
+- Show per-diagram status for batch processing.
+
+## 10.6 Review workspace
+
+This screen is for verifying recognition before editing.
+
+Recommended desktop layout:
+- Left: source image and source-region overlay.
+- Center: reconstructed diagram.
+- Right: issues and element inspector.
+- Top: project/diagram name, detected type, save state, undo/redo.
+- Bottom: zoom, view mode, editor transition, export.
+
+View modes:
+- Side-by-side.
+- Source only.
+- Reconstructed only.
+- Overlay recognized elements on source.
+- Fit to screen, zoom, pan, reset.
+
+Selecting an element in either view should highlight the corresponding element in the other view when a mapping exists.
+
+The issues panel should group warnings by:
+- Text recognition.
+- Shape classification.
+- Connection endpoint.
+- Arrow direction.
+- Chart values.
+- Unsupported output feature.
+- Structural inconsistency.
+
+Provide “Next issue” and “Previous issue” actions so users can resolve warnings quickly.
+
+## 10.7 Diagram editor — central product feature
+
+ODR must provide a real visual editor after recognition. Users should not be forced to edit Mermaid or PlantUML source code to make normal changes.
+
+### 10.7.1 Editor layout
+
+- **Top toolbar:** selection, pan, undo, redo, add shape, connector, text, arrange, zoom, fit, save status.
+- **Left panel:** shape/tool palette or layers/outline list, depending on selected mode.
+- **Center canvas:** editable diagram.
+- **Right inspector:** properties of the selected element(s).
+- **Bottom status bar:** zoom, selection count, validation state, active diagram type.
+- **Optional lower drawer:** source code, JSON, validation report, or version diff.
+
+Panels should be collapsible and resizable. The canvas must have enough room to edit large diagrams.
+
+### 10.7.2 Core canvas interaction
+
+Required:
+- Single-click selects an object.
+- Shift-click adds/removes objects from selection.
+- Drag empty canvas to pan when pan mode is active.
+- Mouse wheel or trackpad zooms around the pointer where practical.
+- Space + drag can pan if the platform and input handling support it.
+- Click-and-drag selects a group using a marquee.
+- Escape clears selection or exits the current tool.
+- Delete/Backspace removes selected elements after a safe interaction.
+- Ctrl/Cmd+Z undo; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redo as appropriate.
+- Fit-to-content and fit-to-selection.
+- Snap-to-grid toggle.
+- Grid visibility toggle.
+- Alignment guides during movement.
+- Multi-select, group move, duplicate, copy/paste, and delete.
+
+Every essential drag operation must have a keyboard-accessible alternative or an inspector-based numeric control.
+
+### 10.7.3 Drag-and-drop shapes
+
+A shape palette should include type-appropriate elements:
+- Flowchart: start/end, process, decision, input/output, predefined process, document, connector.
+- Generic: rectangle, rounded rectangle, ellipse, diamond, text, line, arrow, free connector.
+- Chart editor: chart-specific elements and data editing, not generic flowchart nodes.
+- UML editors: participants, classes, messages, lifelines, associations, multiplicities, and supported UML elements.
+
+Users can drag a shape from the palette to the canvas. New elements receive stable IDs and become part of the canonical model. Type-specific editors should prevent nonsensical properties where possible.
+
+### 10.7.4 Node manipulation
+
+Users can:
+- Move nodes by dragging.
+- Resize shapes using handles.
+- Edit text inline by double-clicking or using a keyboard action.
+- Change shape type where compatible.
+- Duplicate and delete.
+- Change fill, stroke, border width, font, text alignment, and size where the target format supports those properties.
+- Align left/center/right and top/middle/bottom.
+- Distribute spacing evenly.
+- Bring forward/send backward for visual layers when applicable.
+- Lock an element to prevent accidental movement.
+- Toggle snapping and guides.
+
+Text editing must not accidentally trigger node movement. Provide clear edit-mode affordances.
+
+### 10.7.5 Connector and relationship editing
+
+Connector correctness is essential.
+
+Users can:
+- Create a connection by selecting a connector tool and clicking/dragging between endpoints.
+- Reconnect an existing edge by dragging its endpoint to another compatible node.
+- Change direction and arrowhead style.
+- Add or edit edge labels such as “Yes,” “No,” or message names.
+- Change connector routing among supported styles (straight, orthogonal, curved).
+- Add bend points where the editor supports them.
+- Delete a relationship independently of its endpoint nodes.
+- Inspect source and target IDs in the properties panel.
+- See dangling or ambiguous connectors flagged by validation.
+
+When moving a node, attached connectors should remain attached and reroute appropriately. Avoid a system where arrows are just decorative lines independent of node relationships.
+
+Crossings must not automatically become junctions. Junctions and crossings should have distinct visual representations when relevant.
+
+### 10.7.6 Layout tools
+
+Provide:
+- Auto-layout for supported diagram families.
+- Manual layout that preserves user placements.
+- Direction controls (top-to-bottom, left-to-right, etc.) where meaningful.
+- Align and distribute.
+- Snap-to-grid and snap-to-object.
+- “Tidy layout” action with a preview or undo.
+- Reset layout as an explicit action, not an automatic surprise.
+- Preserve semantic relationships when layout changes.
+
+Auto-layout should never silently change connector direction or relationship meaning.
+
+### 10.7.7 Properties inspector
+
+When one element is selected:
+- Element ID.
+- Element type.
+- Label/text.
+- Position and size where meaningful.
+- Style properties supported by the current renderer/exporter.
+- Recognition provenance and uncertainty, if available.
+- Connected nodes/edges.
+- Validation warnings.
+- Lock state.
+
+When multiple elements are selected:
+- Common editable style properties.
+- Alignment and distribution actions.
+- Group movement.
+- Grouping where supported.
+
+For chart types, show data fields and values in a table-style editor. For UML, show the relevant participants, attributes, methods, message order, multiplicity, or other type-specific fields.
+
+### 10.7.8 Editing modes and source code
+
+Provide three conceptual modes:
+1. **Visual mode:** default for most users.
+2. **Source mode:** edit Mermaid or PlantUML text where the output format is supported.
+3. **Data mode:** inspect/edit canonical JSON or chart data.
+
+Source mode must be synchronized with the canonical model. If the user edits code, parse and validate it before updating the model. If parsing fails, preserve the previous valid model and show the error. Do not silently discard visual edits.
+
+If an export format cannot express a property, mark that property as unsupported or format-specific. Avoid implying all styling will round-trip perfectly across every format.
+
+### 10.7.9 Editor undo/redo
+
+- Every meaningful user edit should create an undoable operation.
+- Undo/redo must cover moves, resize, text edits, connector changes, style changes, add/delete, and layout operations.
+- Group a continuous drag into one history entry, not hundreds.
+- Group typing into sensible editing transactions.
+- Undo should restore the model and visual rendering.
+- Recognition results should be preserved as a separate baseline so users can revert to the initial recognized structure.
+- Undo history for the current editing session should not be confused with saved version history.
+
+## 10.8 Screen — Export center
+
+Each output should have a dedicated status:
+- Mermaid.
+- PlantUML.
+- Canonical JSON.
+- PNG.
+- ZIP bundle.
+
+For each:
+- Supported / partial / unsupported status.
+- Validation result.
+- Warnings and lossy-conversion notes.
+- Preview when appropriate.
+- Copy code.
+- Download file.
+- Export again after edits.
+
+PNG options:
+- Background color or transparency where supported.
+- Scale/resolution.
+- Padding.
+- Include/exclude grid and editor selection outlines.
+- Include/exclude warning annotations.
+- Export the whole diagram or selected region.
+
+PNG export must not include editor handles, selection outlines, cursor, toolbars, or debug overlays.
+
+ZIP bundle:
+- One folder per selected diagram.
+- Supported output files.
+- Manifest with diagram type, export formats, schema version, and warnings.
+- Optional source image only if the user explicitly opts in.
+- Never include model weights or unrelated local files.
+
+## 10.9 Settings screen
+
+- Model availability and version.
+- Model folder and disk usage.
+- Local model installation/import.
+- Model license and source metadata.
+- CPU/GPU execution selection where supported.
+- Thread count and memory limits where useful.
+- Default export formats.
+- Auto-save interval.
+- Project storage location.
+- Temporary-file cleanup.
+- Recent-project history preference.
+- Theme and UI preferences.
+- Privacy/offline behavior explanation.
+- Diagnostics and local logs.
+- Reset settings.
+
+No cloud API key fields are needed.
+
+---
+
+# 11. History, Auto-Save, and Project Management
+
+History is a core feature, not an optional afterthought. Users need to recover from recognition mistakes, experimentation, and accidental edits.
+
+## 11.1 Three separate concepts
+
+### A. Recent project history
+A list of local projects the user has opened recently. This is navigation history, not a record of every edit.
+
+### B. Diagram version history
+Saved snapshots of a diagram at meaningful milestones, such as:
+- Initial recognition.
+- User-confirmed recognition.
+- Before major auto-layout.
+- Manual checkpoint.
+- Before a bulk change.
+- Named version created by the user.
+
+### C. Session undo/redo
+Short-term reversible operations inside the active editing session. This must be fast and fine-grained.
+
+These concepts should not be conflated in the UI.
+
+## 11.2 Auto-save requirements
+
+- Auto-save edits to the local project after a short configurable debounce.
+- Show visible states: “Saving…”, “Saved”, and “Save failed”.
+- Do not show “Saved” until the write succeeds.
+- Keep an in-memory recovery state if a save fails.
+- On restart after a crash, offer recovery of unsaved work where feasible.
+- Do not block canvas interaction during routine saves.
+- Provide a manual “Save checkpoint” action.
+
+## 11.3 Version history panel
+
+The history panel should show:
+- Version name or milestone label.
+- Timestamp.
+- Short description of the change.
+- Source of change: recognition, user edit, auto-layout, import, or manual checkpoint.
+- Diagram thumbnail where practical.
+- Optional validation summary.
+
+Actions:
+- Preview version.
+- Compare with current version.
+- Restore version.
+- Rename version.
+- Create named checkpoint.
+- Delete a checkpoint, subject to retention rules.
+
+Restoring a version should create a new current state based on the selected snapshot, not destroy the newer history. Require confirmation for potentially destructive operations.
+
+## 11.4 Compare versions
+
+Provide a comparison view that highlights:
+- Added/removed nodes.
+- Changed labels.
+- Added/removed relationships.
+- Changed edge direction or endpoints.
+- Changed chart data.
+- Layout-only changes separately from semantic changes.
+- Style-only changes separately from semantic changes.
+
+For diagrams where semantic comparison is possible, use stable IDs. For layout, show a visual overlay or side-by-side preview.
+
+## 11.5 History storage and limits
+
+- Store project history locally.
+- Use a versioned project schema.
+- Provide configurable retention or sensible default limits to control disk usage.
+- Do not store every mouse-move as a snapshot.
+- Compress snapshots or store deltas when this is reliable.
+- Keep source images and generated previews separate from model history where practical.
+- Explain storage usage and allow cleanup.
+- Exporting a project backup should be a deliberate user action.
+
+## 11.6 Project format
+
+Use a documented local project structure containing:
+- Project metadata.
+- Original input references or copied source files according to user preference.
+- Canonical diagram JSON.
+- Version history.
+- Generated previews/cache.
+- Export manifest.
+- Model/version metadata used for recognition.
+
+Do not store secrets because no API keys are required. Validate project files before opening them.
+
+---
+
+# 12. Accuracy-First Recognition Architecture
+
+## 12.1 Pipeline overview
+
+1. Input validation and decoding.
+2. Image orientation and quality assessment.
+3. Preprocessing.
+4. Diagram-region detection.
+5. Diagram-type classification.
+6. OCR and text-region detection.
+7. Shape/symbol/data-component detection.
+8. Line and connector extraction.
+9. Endpoint and direction inference.
+10. Type-specific semantic reconstruction.
+11. Canonical-model validation.
+12. Confidence/uncertainty assessment.
+13. Preview rendering.
+14. Human correction.
+15. Export validation and generation.
+
+Every stage should be independently testable. Store diagnostics in a way that helps developers reproduce failures without leaking document content into logs.
+
+## 12.2 Preprocessing
+
+Potential techniques:
+- Orientation detection.
+- Deskew.
+- Perspective correction.
+- Contrast normalization.
+- Denoising.
+- Shadow reduction.
+- Adaptive thresholding.
+- Background removal.
+- Notebook-line suppression where beneficial.
+- Multiple preprocessing variants for difficult inputs.
+
+Do not apply every filter blindly. Over-processing can destroy thin lines, arrowheads, punctuation, and handwritten strokes. Choose preprocessing variants using validation results and allow users to compare the original with a processed view.
+
+## 12.3 Region detection
+
+Detect candidate diagram boundaries and maintain source-coordinate mappings. Support:
+- Page-level segmentation.
+- Multiple diagram candidates.
+- Text blocks around diagrams.
+- Manual crops.
+- Region adjustments.
+- Overlapping candidates.
+- Manual “not a diagram” labels.
+
+Measure missed regions and false positives. The manual crop tool is a required fallback, not a substitute for improving automatic detection.
+
+## 12.4 OCR and text recognition
+
+- Detect text regions and coordinates.
+- Recognize printed text with a locally runnable OCR engine.
+- Evaluate handwriting-specific recognition separately.
+- Preserve line/word boxes and character-level information if the chosen engine supports it.
+- Keep uncertain readings visible.
+- Allow direct text correction.
+- Never silently replace illegible text with a guessed label.
+- Use diagram context as evidence, not as permission to invent text.
+
+## 12.5 Shape and symbol recognition
+
+Recognize type-specific elements using a combination of:
+- Geometric rules.
+- Contours and line features.
+- Locally runnable object-detection/classification models.
+- Symbol libraries where applicable.
+- Context and layout constraints.
+
+Each detection should preserve its source bounding box and model provenance.
+
+## 12.6 Connector reconstruction
+
+Connector recognition is a high-risk component and needs a dedicated subsystem.
+
+It must:
+- Detect line segments and curves.
+- Identify arrowheads where present.
+- Distinguish line crossings from junctions where possible.
+- Identify likely connector endpoints and attached shapes.
+- Infer direction only when supported by evidence.
+- Preserve edge labels.
+- Handle connectors that enter/exit shapes near boundaries.
+- Avoid duplicate edges caused by fragmented line detection.
+- Flag ambiguous endpoints for review.
+
+Use graph constraints as validation evidence, not as a reason to force a connection that the image does not support.
+
+## 12.7 Type-specific reconstruction
+
+**Flowcharts:** node shapes, directed edges, branch labels, start/end roles, process and decision semantics.
+
+**Charts:** chart family, axes, tick labels, units, categories, series, legend, data values, confidence and estimated-value flags. Distinguish extracting printed values from estimating values based on plotted geometry.
+
+**Sequence diagrams:** participants, lifelines, ordered messages, direction, labels, activation metadata where supported.
+
+**Class / ER diagrams:** entities, attributes, methods, keys, relationship endpoints, cardinality, multiplicity.
+
+**Generic diagrams:** objects, labels, geometry, connectors, and extensible properties.
+
+## 12.8 Uncertainty model
+
+Track uncertainty at the element and relationship level. Numeric confidence should only be displayed if calibrated against a representative evaluation set. Otherwise use descriptive states such as:
+- Needs review.
+- Likely correct.
+- Uncertain.
+- Unsupported.
+
+Prioritize warnings by potential semantic impact. A questionable arrow direction is more important than a small spacing difference.
+
+## 12.9 No silent hallucination policy
+
+ODR must not:
+- Invent missing labels.
+- Add connectors only because they make the graph look logical.
+- Infer a chart value without marking it as estimated.
+- Change arrow direction without evidence.
+- Drop unsupported elements silently.
+- Claim that an output is equivalent when important semantics are missing.
+
+If several interpretations are plausible, present alternatives or require user correction.
+
+---
+
+# 13. Canonical Diagram Model
+
+All editing, validation, history, and exports operate on a canonical, versioned model.
+
+## 13.1 Common fields
+
+- Schema version.
+- Project ID and diagram ID.
+- Diagram name.
+- Diagram family and subtype.
+- Source file/page/region references.
+- Source image dimensions and coordinate system.
+- Elements with stable IDs.
+- Relationships with stable IDs.
+- Labels and extracted text.
+- Geometry and layout.
+- Style properties where supported.
+- Type-specific data.
+- Recognition provenance and uncertainty.
+- Validation issues.
+- Export capability information.
+- Creation/update metadata.
+
+## 13.2 Type-specific data
+
+A generic graph is insufficient for all diagrams.
+
+- Flowchart: nodes, directed edges, branch labels, node roles.
+- Chart: axes, units, categories, series, values, legend, estimated-value flags.
+- Sequence: participants, ordered messages, sender/receiver, message type.
+- Class/ER: entities, fields, methods, relationships, cardinalities and multiplicities.
+- Generic: extensible typed objects, connectors, labels, geometry, and properties.
+
+## 13.3 Stable IDs
+
+Stable IDs are necessary for:
+- Selecting elements.
+- Keeping connectors attached.
+- Synchronizing editor and source.
+- Comparing versions.
+- Preserving user corrections during re-layout.
+- Producing semantic diffs.
+
+Do not identify elements only by their label because labels can be duplicated or edited.
+
+---
+
+# 14. Visual Editor Data and Interaction Rules
+
+## 14.1 Canonical model drives the editor
+
+The canvas is a view of the canonical model, not the model itself. Moving a node changes its geometry. Reconnecting an edge changes its source/target relationship. Editing a chart value changes structured data. Rendering updates from model state.
+
+## 14.2 Selection and focus
+
+- Show a clear outline and handles for selected elements.
+- Show a different focus state for keyboard navigation.
+- Distinguish selected, hovered, locked, and uncertain elements.
+- Avoid overwhelming the canvas with permanent bounding boxes.
+- Clicking an issue should focus the relevant element.
+- Multi-select must clearly show the selection count.
+
+## 14.3 Drag behavior
+
+- Use pointer capture or equivalent robust handling to avoid losing a drag mid-operation.
+- Provide snapping and alignment guides.
+- Do not move a node when the user intended to edit its text.
+- Attached connectors follow node movement.
+- A group drag is one undoable transaction.
+- Provide escape/cancel behavior during a drag.
+- Support touch input where the platform allows it.
+- Provide inspector-based coordinate controls as an alternative to dragging.
+
+## 14.4 Diagram layout versus semantic meaning
+
+Layout operations may reposition nodes and reroute connectors but must not change semantic relationships. “Auto-layout” and “Reset layout” must be separate actions with clear effects. Users must be able to undo layout changes.
+
+## 14.5 Format limitations in the editor
+
+Some properties can be represented in the canonical model and PNG but not in Mermaid or PlantUML. The UI should label format-specific limitations and preserve the canonical property rather than silently deleting it during export.
+
+---
+
+# 15. Export Requirements
+
+## 15.1 Mermaid
+
+- Generate only supported diagram syntax.
+- Validate syntax locally.
+- Render a preview locally.
+- Preserve labels, direction, and supported relationships.
+- Explain unsupported constructs.
+- Allow source inspection and copying.
+
+## 15.2 PlantUML
+
+- Generate supported PlantUML diagram types.
+- Use a local rendering setup.
+- Validate syntax and render before declaring success.
+- Clearly indicate partial/lossy output.
+- Avoid requiring a hosted PlantUML server.
+
+## 15.3 JSON
+
+- Export the canonical type-aware model.
+- Include schema version.
+- Include stable IDs and relationships.
+- Preserve geometry, data, labels, and relevant provenance.
+- Exclude unnecessary private logs.
+- Provide a documented schema.
+
+## 15.4 PNG
+
+- Render the reconstructed diagram locally.
+- Exclude editor UI, handles, selection outlines, cursor, and debug annotations by default.
+- Provide scale/resolution, padding, and background options.
+- Support transparent background where technically appropriate.
+- Support full diagram or selected-region export.
+- Make it clear that PNG is a rendered image, not an editable semantic format.
+
+## 15.5 ZIP bundle
+
+- Create a folder per diagram.
+- Include available output formats.
+- Include a manifest with diagram type, schema version, generated formats, warnings, and model metadata.
+- Include original source only if explicitly selected by the user.
+- Do not include unrelated files, model weights, logs, or temporary artifacts.
+
+## 15.6 Export validation
+
+Before showing “Export successful”:
+- Validate generated source syntax.
+- Render Mermaid/PlantUML where supported.
+- Check JSON schema validity.
+- Check PNG file creation and dimensions.
+- Record unsupported or omitted properties.
+- Preserve the canonical model even if an export fails.
+
+---
+
+# 16. Local-Only Technical Stack
+
+## 16.1 Recommended initial stack
+
+**Frontend**
+- React + TypeScript.
+- Vite.
+- A carefully customized component library such as shadcn/ui.
+- SVG-based diagram rendering and hit-testing, or a tested canvas library if scale requires it.
+- A code editor for source inspection.
+- A local state store with explicit model transactions and undo/redo.
+
+**Backend**
+- Python.
+- FastAPI on localhost if using a separate backend process.
+- Pydantic for schema validation.
+- Pytest for unit and integration tests.
+
+**Recognition**
+- OpenCV.
+- PaddleOCR or another licensed, locally runnable OCR engine.
+- ONNX Runtime and/or PyTorch for local models.
+- Type-specific geometry, graph, and chart reconstruction algorithms.
+- Local PDF and image decoding libraries.
+
+**Export**
+- Mermaid.js bundled locally.
+- PlantUML with a local runtime.
+- Graphviz where appropriate.
+- Local SVG/PNG renderer.
+- JSON serialization and validation.
+
+**Persistence**
+- Versioned project files on disk.
+- SQLite may be added for project indexing and history metadata if needed; it is not mandatory for the first prototype.
+- Local snapshot/delta history with retention controls.
+
+**Packaging**
+- Start with a local web application.
+- Consider Tauri or another desktop wrapper after the workflow stabilizes.
+- Bundle or download models with license metadata and integrity checks.
+
+## 16.2 Why not call a cloud AI API?
+
+ODR's recognition path must run with network access disabled after setup. A model adapter can support different local models, but no external inference endpoint should be silently used as fallback. If a model is missing, explain how to install it locally.
+
+## 16.3 Offline verification
+
+- Bundle scripts, fonts, icons, and renderers.
+- No remote analytics or telemetry by default.
+- No externally hosted Mermaid/PlantUML rendering.
+- Run network-isolation tests.
+- Document that initial app/model installation may require a download unless an offline package is provided.
+- Do not claim offline operation until verified.
+
+---
+
+# 17. History and Version Control
+
+## 17.1 Separate history layers
+
+**Recent projects:** navigation list of local projects.
+
+**Version history:** saved snapshots of diagram/project state.
+
+**Undo/redo:** fine-grained reversible edits in the active session.
+
+These must be distinct in UI and implementation.
+
+## 17.2 Auto-save
+
+- Auto-save after a configurable debounce.
+- Show “Saving…”, “Saved”, or “Save failed”.
+- Only show “Saved” after a successful write.
+- Keep an in-memory recovery state if writing fails.
+- Offer recovery after a crash where feasible.
+- Never block ordinary canvas editing during routine saves.
+
+## 17.3 Snapshot triggers
+
+Create snapshots at meaningful milestones:
+- Initial recognition.
+- Recognition accepted by user.
+- Named manual checkpoint.
+- Before large auto-layout.
+- Before bulk operations.
+- Optional periodic checkpoints for long sessions.
+
+Do not create a full saved version for every pointer movement.
+
+## 17.4 History panel
+
+Show:
+- Version label.
+- Timestamp.
+- Short change summary.
+- Origin (recognition, manual edit, auto-layout, import, restore).
+- Thumbnail where practical.
+- Validation status.
+
+Actions:
+- Preview.
+- Compare.
+- Restore.
+- Rename.
+- Create checkpoint.
+- Delete according to retention policy.
+
+Restoring an older version creates a new current state and retains later versions. It must not erase history silently.
+
+## 17.5 Version comparison
+
+Distinguish:
+- Semantic changes: nodes, labels, values, connectors, direction, relationships.
+- Layout changes: position, size, routing.
+- Style changes: fonts, colors, borders.
+- Export changes: format support or validation status.
+
+Provide side-by-side previews and a change list. Use stable IDs to compare elements. If identity cannot be determined confidently, mark the diff as approximate.
+
+## 17.6 History storage
+
+- Store locally.
+- Version the project schema.
+- Limit storage growth with configurable retention.
+- Use deltas where reliable and snapshots for recovery safety.
+- Keep source images, previews, and model state separated where practical.
+- Provide project backup/export.
+- Provide cleanup controls and storage usage.
+
+---
+
+# 18. Data and Project Persistence
+
+A project should include:
+- Project metadata.
+- Source file references or copied originals based on user choice.
+- Page and detected-region metadata.
+- Canonical diagram model(s).
+- Recognition diagnostics needed for review.
+- Version history.
+- Preview cache.
+- Export manifest.
+- Model and schema version information.
+
+Opening a project must validate its schema and file references. A corrupted project should not overwrite a healthy project. Provide backup/recovery when possible.
+
+Do not embed model weights in every project. Avoid storing secrets. Project portability should be documented: whether source images are copied into the project or referenced by path must be clear to users.
+
+---
+
+# 19. Functional Requirements and Priorities
+
+Priority: P0 = MVP requirement; P1 = important next step; P2 = future enhancement.
+
+## 19.1 Import and detection
+- P0: PNG, JPEG, WebP, PDF import.
+- P0: Multi-file import.
+- P0: Candidate diagram detection.
+- P0: Manual crop.
+- P0: Select one/multiple/all candidates.
+- P0: Per-file errors without losing valid imports.
+- P1: TIFF, SVG, clipboard, HEIC/HEIF where supported.
+- P1: Region split/merge.
+- P2: Folder watch and large batch workflows.
+
+## 19.2 Recognition
+- P0: Flowchart pipeline with documented limitations.
+- P0: Text, shape, connector extraction.
+- P0: Canonical model and validation.
+- P0: Uncertainty markers.
+- P1: Chart families and selected UML types.
+- P2: Specialized engineering diagrams.
+
+## 19.3 Editor
+- P0: Select, move, resize, edit labels.
+- P0: Add/delete nodes and connectors.
+- P0: Reconnect endpoints and change direction.
+- P0: Undo/redo.
+- P0: Source/reconstruction preview.
+- P0: Save state and auto-save.
+- P1: Multi-select, align/distribute, snapping, guides.
+- P1: Auto-layout and visual diff.
+- P1: Chart data table editor.
+- P2: Advanced layers, groups, reusable templates, custom plugins.
+
+## 19.4 History
+- P0: Recent projects.
+- P0: Auto-save.
+- P0: Session undo/redo.
+- P1: Named checkpoints and version history.
+- P1: Compare and restore.
+- P2: Advanced delta storage and configurable policies.
+
+## 19.5 Export
+- P0: Canonical JSON.
+- P0: PNG.
+- P0: Mermaid for supported types.
+- P0: PlantUML for supported types.
+- P0: Validation and unsupported-feature reporting.
+- P0: Individual downloads and ZIP bundle.
+- P1: SVG and additional formats after evaluation.
+
+## 19.6 Privacy
+- P0: No external inference API.
+- P0: Local processing after setup.
+- P0: No mandatory account.
+- P0: Local temporary-file cleanup.
+- P0: Offline verification.
+- P1: More granular storage and diagnostics controls.
+
+---
+
+# 20. Accuracy and Benchmark Strategy
+
+## 20.1 Build a benchmark before optimizing
+
+Create a versioned evaluation set with reviewed ground truth. Include:
+- Printed and hand-drawn flowcharts.
+- Multiple diagrams per page.
+- Different handwriting styles.
+- Charts with readable and ambiguous values.
+- Sequence/class/ER diagrams as those families are implemented.
+- Perspective distortion, rotation, low contrast, and notebook backgrounds.
+- Crossings, broken connectors, partial occlusion, and dense layouts.
+- Negative examples that should not be classified as diagrams.
+
+Keep training, tuning, and final test sets separate. Check dataset licenses before use.
+
+## 20.2 Metrics
+
+Report per family:
+- Region detection precision/recall and IoU.
+- OCR character and word error rates.
+- Element detection precision/recall.
+- Connector endpoint accuracy.
+- Directed-edge precision, recall, and F1.
+- Chart value extraction error.
+- Graph exact match where appropriate.
+- Export syntax validity.
+- Semantic fidelity.
+- Number of manual corrections.
+- Time to a correct export.
+- Failure rate by image quality and diagram complexity.
+
+Do not collapse all metrics into a single “accuracy” claim.
+
+## 20.3 Product-level accuracy gates
+
+A diagram family should be labelled “supported” only after:
+1. A representative test set exists.
+2. Structural and text metrics are measured.
+3. Common failure cases are documented.
+4. Export tests pass.
+5. User correction workflows are tested.
+6. Results are repeatable across supported hardware.
+
+Use measured results to establish numerical release targets. Do not invent accuracy percentages before the baseline exists.
+
+---
+
+# 21. Testing Strategy
+
+## 21.1 Unit tests
+- Image orientation and preprocessing.
+- OCR postprocessing.
+- Region coordinate transforms.
+- Shape and connector geometry.
+- Stable ID generation.
+- Canonical schema validation.
+- Undo/redo transactions.
+- Snapshot creation and restore.
+- Export serializers.
+- Unsupported-feature detection.
+
+## 21.2 Integration tests
+- Image → detected region → canonical model.
+- PDF → page → multiple regions → selected diagrams.
+- Recognition → manual correction → export.
+- Editor changes → auto-save → restart → recovery.
+- Version restore → compare → export.
+- Mermaid/PlantUML generation → local rendering.
+
+## 21.3 UI tests
+- Import one and multiple files.
+- Remove an invalid file without losing valid files.
+- Select individual and multiple detected diagrams.
+- Manually create a crop.
+- Move and resize a node.
+- Create and reconnect an edge.
+- Correct a label.
+- Undo and redo changes.
+- Save and reopen a project.
+- Compare and restore a version.
+- Export formats and inspect warnings.
+
+## 21.4 Offline/privacy tests
+- Disable network access and run core workflows.
+- Inspect network traffic for unexpected requests.
+- Confirm no remote scripts/fonts/renderers are loaded.
+- Confirm image contents are not written to logs.
+- Confirm cleanup removes temporary files.
+- Confirm model downloads occur only through an explicit setup action.
+
+## 21.5 Performance tests
+- Typical phone photo.
+- High-resolution scan.
+- Multi-page PDF.
+- Many candidate diagrams.
+- Large and dense diagrams.
+- Long editing sessions with history.
+- Low-memory CPU-only machine.
+- Batch conversion with cancellation.
+
+---
+
+# 22. Error Handling and Recovery
+
+The UI must handle:
+- No diagram detected.
+- Too many false detections.
+- A region containing several diagrams.
+- A diagram cropped at the page edge.
+- Unreadable labels.
+- Ambiguous connectors.
+- Unsupported diagram type.
+- Partially supported exporter.
+- Invalid generated syntax.
+- Missing model files.
+- Insufficient RAM/disk.
+- Failed PDF rendering.
+- Interrupted recognition.
+- Failed auto-save.
+- Corrupt project or history snapshot.
+- User cancellation.
+- Unsupported image encoding.
+
+For every failure:
+1. Explain what happened in plain language.
+2. Preserve original input and last valid model.
+3. Offer an actionable next step.
+4. Do not claim success if output validation failed.
+5. Provide a local diagnostic reference where useful without exposing sensitive content.
+
+---
+
+# 23. MVP Definition
+
+The MVP should prove accurate, useful conversion and correction for a deliberately bounded scope.
+
+## Included
+- Local web interface.
+- Image and PDF import.
+- Multi-file import.
+- Multiple diagram region detection and manual crop.
+- Flowchart recognition as the first quality-gated diagram family.
+- Local OCR and computer vision.
+- Canonical JSON representation.
+- Visual review with source/reconstruction comparison.
+- Drag-and-drop editing of nodes and connectors.
+- Label editing, node move/resize, edge reconnect, undo/redo.
+- Mermaid, PlantUML, JSON, and PNG output when supported.
+- Export validation and warnings.
+- Auto-save and recent project list.
+- Local history foundation.
+- Offline verification.
+- Annotated benchmark and known limitations.
+
+## Defer if necessary
+- Perfect recognition of every chart/UML family.
+- Advanced multi-user collaboration.
+- Cloud accounts and sync.
+- Custom model training from scratch.
+- Full CAD/illustration tools.
+- Complex plugin marketplace.
+- Universal lossless round-trip between all formats.
+
+## MVP acceptance criteria
+- Core processing runs without external inference APIs.
+- User can import supported files and select one or more regions.
+- Flowchart recognition creates a valid canonical model.
+- User can visually fix a label or connector.
+- Moving nodes preserves attached semantic connections.
+- Undo/redo restores previous model states.
+- Auto-save and reopening preserve the latest valid work.
+- Supported exports validate and render.
+- Unsupported exports explain why.
+- Network-isolation tests confirm no unexpected external calls.
+- A benchmark report documents actual results and known limitations.
+
+---
+
+# 24. Roadmap
+
+## Phase 0 — Feasibility and baseline
+- Assemble a small licensed test corpus.
+- Evaluate local OCR and recognition models.
+- Prototype preprocessing, region detection, flowchart reconstruction, and connector inference.
+- Define initial canonical schema.
+- Measure baseline accuracy and resource use.
+
+**Exit:** known failure modes and reproducible baseline.
+
+## Phase 1 — Recognition engine
+- Implement import and preprocessing.
+- Implement region detection and manual cropping.
+- Implement flowchart recognition.
+- Implement canonical schema and validators.
+- Add initial exporters and automated tests.
+
+**Exit:** reliable end-to-end pipeline on the documented benchmark.
+
+## Phase 2 — Review UI and editor
+- Implement multi-region selection.
+- Build source/reconstruction comparison.
+- Build the canvas and inspector.
+- Add drag-and-drop nodes and connectors.
+- Add correction tools, undo/redo, and autosave.
+- Test with real users.
+
+**Exit:** users can detect and correct common errors without editing source code.
+
+## Phase 3 — History and exports
+- Add local project management.
+- Add version snapshots, compare, restore, and storage controls.
+- Improve ZIP export and manifests.
+- Validate renderer behavior offline.
+
+**Exit:** projects can be safely edited, recovered, and exported.
+
+## Phase 4 — Additional diagram families
+- Add chart-specific recognition and data editor.
+- Add selected UML and ER recognizers.
+- Extend schemas, exporters, and benchmarks.
+- Keep each family behind a capability status until it meets acceptance criteria.
+
+**Exit:** each family has documented metrics and known limitations.
+
+## Phase 5 — Packaging and release
+- Package with Tauri or a suitable desktop framework if useful.
+- Improve model setup and offline installation.
+- Audit dependencies and licenses.
+- Test crash recovery and network isolation.
+- Publish documentation and benchmark methodology.
+
+---
+
+# 25. Risks and Mitigations
+
+**Handwriting variation:** Build diverse evaluation data, show uncertainty, and make correction fast.
+
+**Wrong connectors:** Treat connector extraction as a dedicated subsystem; evaluate endpoints and direction separately; flag ambiguous edges.
+
+**Scope explosion:** Start with flowcharts and add families one at a time after they pass quality gates.
+
+**Local model size/performance:** Benchmark memory, startup time, accuracy, and licensing before choosing models.
+
+**Format mismatch:** Use exporter capability tables and explicit warnings; never silently discard unsupported semantics.
+
+**History bloat:** Use meaningful snapshots, bounded undo history, and retention controls.
+
+**Editor complexity:** Keep the default toolbar focused, reveal advanced tools contextually, and make the canvas central.
+
+**Privacy leakage:** Bundle local assets, avoid telemetry, test offline, and inspect network behavior.
+
+**False confidence:** Calibrate confidence or use qualitative uncertainty states.
+
+---
+
+# 26. Success Metrics
+
+Primary:
+- Structural accuracy by diagram family.
+- Directed-edge F1 for flowcharts.
+- OCR character/word error rates.
+- Successful export syntax/render rate.
+- Median manual corrections per diagram.
+- Median time to correct export.
+- Multi-diagram region recall.
+- Recognition failure rate by image quality.
+- Offline workflow success rate.
+- Crash and recovery success rate.
+
+Editor:
+- Time to correct an incorrect connection.
+- Undo/redo correctness.
+- Percentage of users who can move, resize, and reconnect without guidance.
+- Auto-save failure rate.
+- Successful version restoration rate.
+- Accidental semantic changes during layout operations.
+
+Privacy and performance:
+- Unexpected outbound request count (target: zero during core processing).
+- Memory and latency by hardware class.
+- Model storage footprint.
+- Temporary-file cleanup success.
+
+Targets should be based on measured baselines, not invented in advance.
+
+---
+
+# 27. Final Product Definition
+
+ODR is a local-first diagram-recognition and editing workbench. It accepts images and documents, detects individual diagrams, reconstructs their type-specific structure, lets users correct and visually edit the result, maintains local project/version history, and exports appropriate formats.
+
+It is not merely OCR, a cloud AI wrapper, or an image-to-code prompt. Its value lies in:
+- Local and private processing.
+- Multi-diagram detection and selection.
+- Structural reconstruction and validation.
+- Honest uncertainty.
+- A polished drag-and-drop editor.
+- Reliable undo/redo and version history.
+- Consistent output from a canonical model.
+- Measured accuracy and documented limitations.
+
+**Non-negotiable rule:** if ODR is uncertain, it must show the uncertainty. It must never silently trade structural correctness for a cleaner-looking diagram.
+
+**Recommended implementation sequence:** flowchart baseline → canonical model → structural validation → visual correction editor → auto-save/history → exports → chart and UML recognition → desktop packaging.
