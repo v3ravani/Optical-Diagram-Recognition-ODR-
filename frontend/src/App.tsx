@@ -409,6 +409,21 @@ export function App() {
             <span>Local Only</span>
           </div>
 
+          <label
+            className="btn btn-secondary"
+            style={{ padding: '4px 10px', fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+            title="Import and crop a diagram image"
+          >
+            <Upload size={14} />
+            <span>Import & Crop</span>
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/bmp,application/pdf"
+              style={{ display: 'none' }}
+              onChange={handleFileUpload}
+            />
+          </label>
+
           <button className="btn-icon" onClick={() => setIsSettingsOpen(true)} title="Settings">
             <Settings size={16} />
           </button>
