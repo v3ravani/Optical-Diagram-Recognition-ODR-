@@ -587,12 +587,19 @@ class ConnectorExtractor:
             # Construct full path polyline: [p1, w1, w2, ..., p2]
             poly = [p1] + [tuple(w) for w in waypoints] + [p2]
 
+            src_el = next((e for e in elements if e.id == edge_info["source_id"]), None)
+            is_decision_src = src_el and src_el.type == ElementType.DECISION
+
             closest_tb_idx = -1
-            min_tb_dist = 90.0
+            min_tb_dist = 60.0
 
             for idx, tb in enumerate(unassigned_text):
                 if idx in used_text_indices:
                     continue
+                is_branch_word = tb.text.strip().lower() in ("yes", "no", "true", "false")
+                if is_branch_word and not is_decision_src:
+                    continue
+
                 tx_c = tb.x + tb.width / 2.0
                 ty_c = tb.y + tb.height / 2.0
 

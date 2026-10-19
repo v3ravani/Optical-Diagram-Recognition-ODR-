@@ -51,8 +51,8 @@ class OCREngine:
             scale = 1.0
 
             # If crop is low resolution (e.g. screenshot or small diagram), upscale with cubic interpolation
-            if min_dim < 700:
-                scale = min(3.0, 900.0 / max(1, min_dim))
+            if min_dim < 550:
+                scale = min(2.0, 600.0 / max(1, min_dim))
                 scaled_w = int(w * scale)
                 scaled_h = int(h * scale)
                 ocr_input = cv2.resize(image, (scaled_w, scaled_h), interpolation=cv2.INTER_CUBIC)
@@ -120,12 +120,24 @@ class OCREngine:
             (r"\bCoffeomechint\b", "Coffee machine"),
             (r"\bCorreemscrineconsr\b", "Coffee machine"),
             (r"\bCoffeemachine\b", "Coffee machine"),
+            (r"\bCollee\s*machne\b", "Coffee machine"),
+            (r"\bCollee\s*machine\b", "Coffee machine"),
+            (r"\bColleemachine\b", "Coffee machine"),
+            (r"\bCoflee\s*machne\b", "Coffee machine"),
             (r"\bdaasn'twork\b", "doesn't work"),
             (r"\bdoesn'twork\b", "doesn't work"),
             (r"\bRefiltank\b", "Refill tank"),
+            (r"\bReitank\b", "Refill tank"),
             (r"\bRefillgrinder\b", "Refill grinder"),
+            (r"\bRefilgrinder\b", "Refill grinder"),
+            (r"\bRefil\s*grinder\b", "Refill grinder"),
+            (r"\bReilgrinder\b", "Refill grinder"),
+            (r"\bReil\s*grinder\b", "Refill grinder"),
+            (r"\bRei\s*rinder\b", "Refill grinder"),
             (r"\bCantactmainianance\b", "Contact maintenance"),
             (r"\bContactmaintenance\b", "Contact maintenance"),
+            (r"\bContacimaintenance\b", "Contact maintenance"),
+            (r"\bContacl\s*maintenance\b", "Contact maintenance"),
             (r"\bContinueto\b", "Continue to")
         ]
         for pattern, repl in corrections:
