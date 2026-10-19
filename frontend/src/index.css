@@ -388,17 +388,36 @@ input, select, textarea {
 }
 
 .diagram-node {
-  cursor: move;
+  cursor: grab;
   user-select: none;
   transition: filter 0.1s ease;
 }
 
 .diagram-node:hover {
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.08));
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.1));
+}
+
+.diagram-node.is-dragging {
+  cursor: grabbing !important;
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.22)) !important;
+  opacity: 0.94;
 }
 
 .diagram-node.selected {
-  outline: 2px solid var(--accent-primary);
+  outline: none;
+}
+
+.anchor-port {
+  fill: #ffffff;
+  stroke: var(--accent-primary);
+  stroke-width: 1.5;
+  cursor: crosshair;
+  transition: r 0.12s ease, fill 0.12s ease;
+}
+
+.anchor-port:hover {
+  fill: var(--accent-primary);
+  r: 5.5;
 }
 
 .node-selection-box {

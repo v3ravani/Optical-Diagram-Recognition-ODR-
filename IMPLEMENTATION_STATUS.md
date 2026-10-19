@@ -68,6 +68,8 @@
 - **Frontend Build**: `tsc -b && vite build` completed with 0 errors.
 - **Hand-Drawn & Lined Paper Flowchart**: Verified on hand-drawn troubleshooting diagram on notebook paper (`samples/hand_drawn_lamp.png`).
 - **Container Suppression**: Verified container elimination preventing outer frames from swallowing inner diagram text.
+- **Editor Drag & Drop Interaction**: Verified via browser subagent recording (`verify_editor_drag_and_drop`) confirming nodes release cleanly and stay in place upon mouseup.
+- **Adaptive OCR & Smart Routing**: Multi-scale upscaling for small crops and 4-way anchor connection ports with grid snapping.
 
 ---
 
@@ -77,3 +79,5 @@
 - `2264cda`: `feat: implement interactive canvas editor, review workspace, and export modals`
 - `6b81fd6`: `feat: add end-to-end sample test suite, runner, and documentation`
 - `b258aea`: `chore: ignore runtime data directory`
+- `39c5db1`: `fix: hand-drawn flowchart recognition and container suppression fix`
+- Current: `fix: editor drag-and-drop stickiness, smart orthogonal routing, and adaptive OCR scaling`

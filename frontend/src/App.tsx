@@ -319,6 +319,23 @@ export function App() {
         setActiveTool('pan');
       } else if (e.key === 'c' || e.key === 'C') {
         setActiveTool('connector');
+      } else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && selectedElementId && diagram) {
+        e.preventDefault();
+        const step = e.shiftKey ? 20 : 10;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        updateDiagram({
+          ...diagram,
+          elements: diagram.elements.map((el) =>
+            el.id === selectedElementId
+              ? { ...el, x: Math.max(0, el.x + dx), y: Math.max(0, el.y + dy) }
+              : el
+          )
+        }, true);
+      } else if (e.key === 'Escape') {
+        setSelectedElementId(null);
+        setSelectedConnectorId(null);
+        setActiveTool('select');
       }
     };
 

@@ -38,13 +38,28 @@ class OCREngine:
     def extract_text(self, image: np.ndarray) -> List[OCRTextBlock]:
         """
         Runs local OCR on the given BGR image.
+        Uses adaptive multi-scale inference for low-resolution diagram crops.
         Returns a list of detected text blocks with coordinates and confidence.
         """
         if self._engine is None:
             return []
 
         try:
-            results, elapse = self._engine(image)
+            import cv2
+            h, w = image.shape[:2]
+            min_dim = min(h, w)
+            scale = 1.0
+
+            # If crop is low resolution (e.g. screenshot or small diagram), upscale with cubic interpolation
+            if min_dim < 700:
+                scale = min(3.0, 900.0 / max(1, min_dim))
+                scaled_w = int(w * scale)
+                scaled_h = int(h * scale)
+                ocr_input = cv2.resize(image, (scaled_w, scaled_h), interpolation=cv2.INTER_CUBIC)
+            else:
+                ocr_input = image
+
+            results, elapse = self._engine(ocr_input)
             if not results:
                 return []
 
@@ -53,12 +68,15 @@ class OCREngine:
                 # item is [box, text, score]
                 poly, text, score = item[0], item[1], float(item[2])
                 
-                # poly is [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
-                poly_arr = np.array(poly, dtype=np.int32)
+                # Map back to original coordinate scale
+                poly_arr = np.array(poly, dtype=np.float32)
+                if scale != 1.0:
+                    poly_arr = poly_arr / scale
+
                 x = int(np.min(poly_arr[:, 0]))
                 y = int(np.min(poly_arr[:, 1]))
-                w = int(np.max(poly_arr[:, 0]) - x)
-                h = int(np.max(poly_arr[:, 1]) - y)
+                w_box = int(np.max(poly_arr[:, 0]) - x)
+                h_box = int(np.max(poly_arr[:, 1]) - y)
 
                 clean_text = str(text).strip()
                 if clean_text:
@@ -67,9 +85,9 @@ class OCREngine:
                         confidence=score,
                         x=max(0, x),
                         y=max(0, y),
-                        width=max(1, w),
-                        height=max(1, h),
-                        polygon=poly_arr.tolist()
+                        width=max(1, w_box),
+                        height=max(1, h_box),
+                        polygon=[[int(pt[0]), int(pt[1])] for pt in poly_arr]
                     ))
 
             return blocks

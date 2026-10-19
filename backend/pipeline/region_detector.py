@@ -93,12 +93,17 @@ class RegionDetector:
     def _infer_diagram_type(cls, crop: np.ndarray) -> Tuple[DiagramFamily, str]:
         """
         Infers whether a region looks like a Flowchart vs Bar Chart vs Pie Chart.
+        Defaults to Flowchart unless strong evidence of coordinate axes or circular pie sectors exists.
         """
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        from backend.pipeline.preprocessor import ImagePreprocessor
+        # Suppress notebook lines first to prevent ruled lines from masquerading as axes
+        cleaned = ImagePreprocessor.suppress_notebook_lines(crop)
+        gray = cv2.cvtColor(cleaned, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
         
         # Check for circular shapes (pie chart indicator - requires strict param2=80)
-        min_dim = min(crop.shape[:2])
+        h, w = crop.shape[:2]
+        min_dim = min(h, w)
         circles = cv2.HoughCircles(
             gray,
             cv2.HOUGH_GRADIENT,
@@ -112,23 +117,42 @@ class RegionDetector:
         if circles is not None and len(circles[0]) >= 1:
             return DiagramFamily.CHART, "pie_chart"
 
-        # Check for coordinate axes (horizontal and vertical prominent lines meeting at an origin)
-        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=80, minLineLength=int(min(crop.shape[:2]) * 0.3), maxLineGap=10)
-        has_horizontal_axis = False
-        has_vertical_axis = False
+        # Check for genuine coordinate axes:
+        # A bar chart requires an L-shaped axis system where:
+        # 1. The horizontal X-axis sits in the bottom third of the crop (y > 0.65 * h)
+        # 2. The vertical Y-axis sits in the left third of the crop (x < 0.35 * w)
+        # 3. Both axes originate/intersect near the bottom-left corner
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=90, minLineLength=int(min_dim * 0.35), maxLineGap=10)
+        h_axes: List[Tuple[int, int, int, int]] = []
+        v_axes: List[Tuple[int, int, int, int]] = []
+
         if lines is not None:
             for line in lines:
                 l = line[0] if len(line.shape) > 1 else line
                 x1, y1, x2, y2 = int(l[0]), int(l[1]), int(l[2]), int(l[3])
                 dx = abs(x2 - x1)
                 dy = abs(y2 - y1)
-                if dy < 5 and dx > crop.shape[1] * 0.4:
-                    has_horizontal_axis = True
-                if dx < 5 and dy > crop.shape[0] * 0.4:
-                    has_vertical_axis = True
+                mid_y = (y1 + y2) / 2.0
+                mid_x = (x1 + x2) / 2.0
 
-        if has_horizontal_axis and has_vertical_axis:
-            return DiagramFamily.CHART, "bar_chart"
+                # Horizontal axis in lower half of image
+                if dy < 8 and dx > w * 0.35 and mid_y > h * 0.60:
+                    h_axes.append((x1, y1, x2, y2))
+                # Vertical axis in left half of image
+                elif dx < 8 and dy > h * 0.35 and mid_x < w * 0.40:
+                    v_axes.append((x1, y1, x2, y2))
+
+        # Check if any horizontal axis and vertical axis intersect near bottom-left
+        if h_axes and v_axes:
+            for hx1, hy1, hx2, hy2 in h_axes:
+                h_left_x = min(hx1, hx2)
+                h_y = (hy1 + hy2) / 2.0
+                for vx1, vy1, vx2, vy2 in v_axes:
+                    v_bot_y = max(vy1, vy2)
+                    v_x = (vx1 + vx2) / 2.0
+                    # Distance between horizontal start and vertical bottom must be small
+                    if abs(h_left_x - v_x) < w * 0.18 and abs(h_y - v_bot_y) < h * 0.18:
+                        return DiagramFamily.CHART, "bar_chart"
 
         # Default standard is flowchart
         return DiagramFamily.FLOWCHART, "standard_flowchart"
