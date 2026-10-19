@@ -18,9 +18,29 @@ export type ElementType =
   | 'actor'
   | 'participant'
   | 'class_box'
-  | 'note';
+  | 'note'
+  | 'external_entity'
+  | 'data_store'
+  | 'data_flow'
+  | 'lifeline'
+  | 'activation'
+  | 'message'
+  | 'return_message'
+  | 'entity'
+  | 'attribute'
+  | 'relationship'
+  | 'key_attribute';
 
-export type DiagramFamily = 'flowchart' | 'chart' | 'uml' | 'generic';
+export type DiagramFamily =
+  | 'flowchart'
+  | 'dfd'
+  | 'sequence'
+  | 'erd'
+  | 'bar_chart'
+  | 'pie_chart'
+  | 'chart'
+  | 'uml'
+  | 'generic';
 
 export type ConnectorDirection = 'directed' | 'bidirectional' | 'undirected';
 

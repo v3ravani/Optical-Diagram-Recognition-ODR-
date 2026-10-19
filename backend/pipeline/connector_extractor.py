@@ -1,11 +1,13 @@
 """
-ODR Connector and Arrowhead Extractor.
+ODR Connector and Arrowhead Extractor (Version 2.0).
 Extracts diagram connectors, routes lines, detects arrowhead orientation,
-snaps endpoints to shape boundaries, and associates branch labels (Yes/No).
+snaps endpoints to shape boundaries, resolves line crossings without junctions,
+preserves loops/feedback paths and multiple incoming/outgoing arrows,
+and associates branch labels (Yes/No/conditions).
 """
 
 import math
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Set
 import cv2
 import numpy as np
 from backend.core.models import (
@@ -33,6 +35,8 @@ class ConnectorExtractor:
     ) -> List[DiagramConnector]:
         """
         Extracts connectors connecting the detected elements and attaches branch labels.
+        Preserves graph topology: multiple arrows entering one node, multiple branches
+        leaving decision diamonds, loops/feedback paths, and crossing lines without junctions.
         """
         if len(elements) < 2:
             return []
@@ -63,138 +67,204 @@ class ConnectorExtractor:
             bh = min(img_h - by, tb.height + 4)
             cv2.rectangle(line_mask, (bx, by), (bx + bw, by + bh), 0, -1)
 
-        # Find line segments via Probabilistic Hough Transform
-        lines = cv2.HoughLinesP(
+        # 1. Morphological thinning / skeleton to obtain 1-pixel wide line centerlines
+        skeleton = cls._morphological_skeleton(line_mask)
+
+        # 2. Extract line segments via HoughLinesP on the line mask
+        hough_lines = cv2.HoughLinesP(
             line_mask,
             rho=1,
             theta=np.pi / 180,
-            threshold=25,
-            minLineLength=20,
-            maxLineGap=15
+            threshold=20,
+            minLineLength=16,
+            maxLineGap=12
         )
 
-        # Also find connected components in the line mask
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(line_mask, connectivity=8)
+        # 3. Detect candidate paths: combining skeleton components and hough segments
+        candidate_edges = cls._find_candidate_paths(
+            line_mask, skeleton, hough_lines, elements, thresh
+        )
 
+        # 4. Deduplicate candidate edges carefully (preserving multi-arrows and loops!)
+        deduped = cls._deduplicate_edges(candidate_edges, elements)
+
+        # 5. Fallback for faint/hand-drawn lines if some elements have zero connections
+        if len(deduped) < len(elements) - 1:
+            deduped = cls._infer_fallback_connections(elements, deduped)
+
+        # 6. Associate unassigned text blocks as edge labels (e.g. Yes / No / conditions)
+        connectors = cls._attach_labels_and_build(deduped, unassigned_text, elements)
+
+        return connectors
+
+    @classmethod
+    def _morphological_skeleton(cls, img: np.ndarray) -> np.ndarray:
+        """Computes morphological skeleton of binary image without requiring cv2.ximgproc."""
+        skel = np.zeros_like(img)
+        element = cv2.getStructuringElement(cv2.MORPH_CROSS, (3, 3))
+        temp_img = img.copy()
+        
+        for _ in range(50):
+            eroded = cv2.erode(temp_img, element)
+            temp = cv2.dilate(eroded, element)
+            temp = cv2.subtract(temp_img, temp)
+            skel = cv2.bitwise_or(skel, temp)
+            temp_img = eroded.copy()
+            if cv2.countNonZero(temp_img) == 0:
+                break
+        return skel
+
+    @classmethod
+    def _find_candidate_paths(
+        cls,
+        line_mask: np.ndarray,
+        skeleton: np.ndarray,
+        hough_lines: Optional[np.ndarray],
+        elements: List[DiagramElement],
+        thresh: np.ndarray
+    ) -> List[Dict[str, Any]]:
+        """
+        Extracts paths between shapes, handling crossing lines and multi-segment orthogonal paths.
+        """
+        img_h, img_w = line_mask.shape[:2]
         candidate_edges: List[Dict[str, Any]] = []
 
-        # Analyze line segments and connected clusters
+        # Find connected components in the line mask
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(line_mask, connectivity=8)
+
         for i in range(1, num_labels):
             stat = stats[i]
             area = stat[cv2.CC_STAT_AREA]
             cw = stat[cv2.CC_STAT_WIDTH]
             ch = stat[cv2.CC_STAT_HEIGHT]
-            # Must be long enough to span between nodes
             if area < 15 or (cw < 15 and ch < 15):
                 continue
 
             comp_mask = (labels == i).astype(np.uint8) * 255
             pts = cv2.findNonZero(comp_mask)
-            if pts is None or len(pts) < 10:
+            if pts is None or len(pts) < 8:
                 continue
 
-            # Fit line or find extremities
             pts_2d = pts.reshape(-1, 2)
-            p1, p2 = cls._find_extremity_points(pts_2d)
 
-            # Snap p1 and p2 to shapes
-            source_el, source_dist, source_handle = cls._find_closest_shape(p1, elements)
-            target_el, target_dist, target_handle = cls._find_closest_shape(p2, elements)
+            # Check if this component contains crossing lines (e.g. horizontal + vertical crossing)
+            sub_paths = cls._resolve_crossings_in_component(comp_mask, pts_2d)
 
-            if source_el and target_el and source_el.id != target_el.id:
-                # Snap distance tolerance (within 70 pixels)
-                max_snap_dist = 85.0
-                if source_dist <= max_snap_dist and target_dist <= max_snap_dist:
-                    # Detect arrowhead polarity
-                    direction, src_id, tgt_id, src_h, tgt_h = cls._detect_arrow_polarity(
-                        thresh, p1, p2, source_el, target_el, source_handle, target_handle
-                    )
-                    
-                    # Detect intermediate waypoints for orthogonal routing
-                    waypoints = cls._detect_waypoints(pts_2d, p1, p2)
+            for p_start, p_end, waypoints in sub_paths:
+                source_el, source_dist, source_handle = cls._find_closest_shape(p_start, elements)
+                target_el, target_dist, target_handle = cls._find_closest_shape(p_end, elements)
 
-                    candidate_edges.append({
-                        "source_id": src_id,
-                        "target_id": tgt_id,
-                        "source_handle": src_h,
-                        "target_handle": tgt_h,
-                        "p1": p1,
-                        "p2": p2,
-                        "midpoint": ((p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0),
-                        "direction": direction,
-                        "waypoints": waypoints,
-                        "confidence": 0.92
-                    })
+                if source_el and target_el and source_el.id != target_el.id:
+                    max_snap_dist = 90.0
+                    if source_dist <= max_snap_dist and target_dist <= max_snap_dist:
+                        # Detect arrowhead polarity & direction
+                        direction, src_id, tgt_id, src_h, tgt_h = cls._detect_arrow_polarity(
+                            thresh, p_start, p_end, source_el, target_el, source_handle, target_handle
+                        )
 
-        # Deduplicate candidate edges (merge edges with same source and target)
-        deduped = cls._deduplicate_edges(candidate_edges, elements)
+                        candidate_edges.append({
+                            "source_id": src_id,
+                            "target_id": tgt_id,
+                            "source_handle": src_h,
+                            "target_handle": tgt_h,
+                            "p1": p_start,
+                            "p2": p_end,
+                            "midpoint": ((p_start[0] + p_end[0]) / 2.0, (p_start[1] + p_end[1]) / 2.0),
+                            "direction": direction,
+                            "waypoints": waypoints,
+                            "confidence": 0.94
+                        })
 
-        # Fallback: If elements are vertically/horizontally aligned but lines were faint,
-        # infer sequential flowchart connections based on topological flow
-        if len(deduped) < len(elements) - 1:
-            deduped = cls._infer_fallback_connections(elements, deduped)
-
-        # Associate unassigned text blocks as edge labels (e.g. Yes / No)
-        connectors: List[DiagramConnector] = []
-        used_text_indices = set()
-
-        for edge_info in deduped:
-            label = ""
-            mx, my = edge_info["midpoint"]
-            
-            # Find closest unassigned text within 120px of any point along the connector
-            closest_tb_idx = -1
-            min_tb_dist = 120.0
-
-            p1 = edge_info.get("p1", (mx, my))
-            p2 = edge_info.get("p2", (mx, my))
-            check_points = [p1, p2, (mx, my)] + edge_info.get("waypoints", [])
-
-            for idx, tb in enumerate(unassigned_text):
-                if idx in used_text_indices:
+        # Also inspect standalone Hough segments if connected components missed faint bridges
+        if hough_lines is not None:
+            for l in hough_lines:
+                coords = l.flatten()
+                if len(coords) < 4:
                     continue
-                tx_c = tb.x + tb.width / 2.0
-                ty_c = tb.y + tb.height / 2.0
-                dist = min(math.hypot(cpx - tx_c, cpy - ty_c) for cpx, cpy in check_points)
-                if dist < min_tb_dist:
-                    min_tb_dist = dist
-                    closest_tb_idx = idx
+                x1, y1, x2, y2 = coords[:4]
+                length = math.hypot(x2 - x1, y2 - y1)
+                if length < 25:
+                    continue
 
-            if closest_tb_idx != -1:
-                used_text_indices.add(closest_tb_idx)
-                label = unassigned_text[closest_tb_idx].text
+                p1 = (int(x1), int(y1))
+                p2 = (int(x2), int(y2))
 
-            conn = DiagramConnector(
-                source_id=edge_info["source_id"],
-                target_id=edge_info["target_id"],
-                source_handle=edge_info.get("source_handle", "auto"),
-                target_handle=edge_info.get("target_handle", "auto"),
-                label=label,
-                direction=edge_info.get("direction", ConnectorDirection.DIRECTED),
-                routing=ConnectorStyle.ORTHOGONAL,
-                waypoints=[Point(x=float(pt[0]), y=float(pt[1])) for pt in edge_info.get("waypoints", [])],
-                style=ConnectorStyleProps(
-                    stroke="#2b3a42",
-                    stroke_width=2.0,
-                    arrow_head="classic"
-                ),
-                confidence=edge_info.get("confidence", 0.90),
-                uncertainty_status=UncertaintyStatus.LIKELY_CORRECT,
-                provenance={"detected_line_dist": math.hypot(edge_info["p1"][0] - edge_info["p2"][0], edge_info["p1"][1] - edge_info["p2"][1])}
-            )
-            connectors.append(conn)
+                s_el, s_dist, s_h = cls._find_closest_shape(p1, elements)
+                t_el, t_dist, t_h = cls._find_closest_shape(p2, elements)
 
-        return connectors
+                if s_el and t_el and s_el.id != t_el.id:
+                    if s_dist <= 80.0 and t_dist <= 80.0:
+                        direction, src_id, tgt_id, src_h, tgt_h = cls._detect_arrow_polarity(
+                            thresh, p1, p2, s_el, t_el, s_h, t_h
+                        )
+                        candidate_edges.append({
+                            "source_id": src_id,
+                            "target_id": tgt_id,
+                            "source_handle": src_h,
+                            "target_handle": tgt_h,
+                            "p1": p1,
+                            "p2": p2,
+                            "midpoint": ((p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0),
+                            "direction": direction,
+                            "waypoints": [],
+                            "confidence": 0.88
+                        })
+
+        return candidate_edges
+
+    @classmethod
+    def _resolve_crossings_in_component(
+        cls,
+        comp_mask: np.ndarray,
+        pts: np.ndarray
+    ) -> List[Tuple[Tuple[int, int], Tuple[int, int], List[Tuple[float, float]]]]:
+        """
+        Detects if a connected component is a simple line, an orthogonal bend (L/Z/U-shape),
+        or two lines crossing perpendicularly without a junction.
+        Returns a list of (start_pt, end_pt, waypoints) paths.
+        """
+        # Bounding box of component
+        x_min, y_min = np.min(pts, axis=0)
+        x_max, y_max = np.max(pts, axis=0)
+        w = x_max - x_min
+        h = y_max - y_min
+
+        # Check for orthogonal crossing (aspect ratio close to 1:1, both wide and tall)
+        # and has continuous horizontal and vertical bands across center
+        if w > 60 and h > 60:
+            mid_x = (x_min + x_max) // 2
+            mid_y = (y_min + y_max) // 2
+
+            # Check if there is a crossing: horizontal span around mid_y and vertical span around mid_x
+            h_slice = comp_mask[max(0, mid_y - 8):min(comp_mask.shape[0], mid_y + 8), x_min:x_max]
+            v_slice = comp_mask[y_min:y_max, max(0, mid_x - 8):min(comp_mask.shape[1], mid_x + 8)]
+
+            h_span = np.sum(h_slice > 0, axis=0)
+            v_span = np.sum(v_slice > 0, axis=1)
+
+            # If both horizontal and vertical lines cross each other through the center
+            if np.mean(h_span > 0) > 0.65 and np.mean(v_span > 0) > 0.65:
+                # Two distinct paths crossing without junction:
+                # Path 1: Horizontal path
+                p1_h = (int(x_min), int(mid_y))
+                p2_h = (int(x_max), int(mid_y))
+                # Path 2: Vertical path
+                p1_v = (int(mid_x), int(y_min))
+                p2_v = (int(mid_x), int(y_max))
+                return [(p1_h, p2_h, []), (p1_v, p2_v, [])]
+
+        # Standard path (single straight or bent line)
+        p1, p2 = cls._find_extremity_points(pts)
+        waypoints = cls._detect_waypoints(pts, p1, p2)
+        return [(p1, p2, waypoints)]
 
     @classmethod
     def _find_extremity_points(cls, pts: np.ndarray) -> Tuple[Tuple[int, int], Tuple[int, int]]:
         """Finds the two furthest points in a set of line pixels."""
-        # Find points furthest from centroid
         centroid = np.mean(pts, axis=0)
         dists = np.sum((pts - centroid) ** 2, axis=1)
         p1 = tuple(pts[np.argmax(dists)])
 
-        # Furthest point from p1
         dists_p1 = np.sum((pts - np.array(p1)) ** 2, axis=1)
         p2 = tuple(pts[np.argmax(dists_p1)])
 
@@ -212,11 +282,9 @@ class ConnectorExtractor:
 
         px, py = pt
         for el in elements:
-            # Calculate distance to closest border point of element bounding box
             cx = el.x + el.width / 2.0
             cy = el.y + el.height / 2.0
 
-            # Distance to 4 anchor handles
             anchors = {
                 "top": (cx, el.y),
                 "bottom": (cx, el.y + el.height),
@@ -245,23 +313,11 @@ class ConnectorExtractor:
         h2: str
     ) -> Tuple[ConnectorDirection, str, str, str, str]:
         """
-        Determines direction between source and target based on arrowhead tip density.
+        Determines direction between source and target based on arrowhead geometry and roles.
+        Preserves loops/feedback paths (does NOT flip arrows purely because of vertical position).
         """
         img_h, img_w = thresh.shape[:2]
         
-        # Check density of pixels in small window around p1 vs p2
-        r = 12
-        def window_density(p):
-            x1 = max(0, p[0] - r)
-            y1 = max(0, p[1] - r)
-            x2 = min(img_w, p[0] + r)
-            y2 = min(img_h, p[1] + r)
-            win = thresh[y1:y2, x1:x2]
-            return np.sum(win > 0)
-
-        d1 = window_density(p1)
-        d2 = window_density(p2)
-
         # 1. Topological constraints based on node roles
         # Start node: only outgoing edges
         if source_el.role == "start" and target_el.role != "start":
@@ -275,43 +331,63 @@ class ConnectorExtractor:
         if source_el.role == "end" and target_el.role != "end":
             return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
 
-        # Decision diamond: branching source
-        if source_el.type == ElementType.DECISION and target_el.type != ElementType.DECISION:
-            return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
-        if target_el.type == ElementType.DECISION and source_el.type != ElementType.DECISION and d1 > d2:
-            return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
+        # Check density and gradient of pixels in small window around p1 vs p2
+        r = 14
+        def window_density(p):
+            x1 = max(0, p[0] - r)
+            y1 = max(0, p[1] - r)
+            x2 = min(img_w, p[0] + r)
+            y2 = min(img_h, p[1] + r)
+            win = thresh[y1:y2, x1:x2]
+            return float(np.sum(win > 0))
 
-        # 2. Local pixel density check for arrowhead triangle
-        if d2 > d1 * 1.25:
+        d1 = window_density(p1)
+        d2 = window_density(p2)
+
+        # 2. Decision diamond branching
+        if source_el.type == ElementType.DECISION and target_el.type != ElementType.DECISION:
+            if d1 > d2 * 1.4:
+                # Strong arrowhead pointing INTO the decision node (incoming loop)
+                return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
+            # Normal decision branch: leaves decision node
+            return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
+
+        if target_el.type == ElementType.DECISION and source_el.type != ElementType.DECISION:
+            if d2 > d1 * 1.4:
+                # Normal incoming edge into decision node
+                return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
+            elif d1 > d2 * 1.2:
+                # Edge leaves decision node towards source_el
+                return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
+
+        # 3. Arrowhead density check (arrowhead triangle has 2-3x density of straight thin line)
+        if d2 > d1 * 1.15:
             # Arrow is at p2, pointing into target_el
             return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
-        elif d1 > d2 * 1.25:
+        elif d1 > d2 * 1.15:
             # Arrow is at p1, pointing into source_el (so direction is reversed)
             return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
 
-        # 3. Default flow: downward / rightward flow in flowcharts
-        cy_src = source_el.y + source_el.height / 2.0
-        cy_tgt = target_el.y + target_el.height / 2.0
-        if cy_src <= cy_tgt:
-            return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
-        else:
-            return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
+        # 4. Handle loops/feedback paths vs forward flow:
+        # If p2 connects to the top or left handle of target_el while target_el is higher than source_el,
+        # it is often an upward feedback loop! Do NOT arbitrarily reverse it.
+        # Preserve the traced orientation (p1 -> p2) unless strong geometric evidence indicates otherwise.
+        return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
 
     @classmethod
     def _detect_waypoints(cls, pts: np.ndarray, p1: Tuple[int, int], p2: Tuple[int, int]) -> List[Tuple[float, float]]:
-        """Detects if a connector has an orthogonal L-bend or Z-bend."""
+        """Detects intermediate waypoints for orthogonal L-bend, Z-bend, or loop."""
         dx = abs(p2[0] - p1[0])
         dy = abs(p2[1] - p1[1])
-        if dx > 40 and dy > 40:
-            # Corner is either (p1.x, p2.y) or (p2.x, p1.y)
+        if dx > 30 and dy > 30:
             corner_1 = np.array([p1[0], p2[1]])
             corner_2 = np.array([p2[0], p1[1]])
             
             d1 = np.min(np.sum((pts - corner_1) ** 2, axis=1))
             d2 = np.min(np.sum((pts - corner_2) ** 2, axis=1))
-            if d1 < 250:
+            if d1 < 300:
                 return [(float(p1[0]), float(p2[1]))]
-            elif d2 < 250:
+            elif d2 < 300:
                 return [(float(p2[0]), float(p1[1]))]
 
         return []
@@ -322,24 +398,43 @@ class ConnectorExtractor:
         edges: List[Dict[str, Any]],
         elements: List[DiagramElement]
     ) -> List[Dict[str, Any]]:
-        el_map = {el.id: el for el in elements}
-        pair_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        """
+        Deduplicates candidate edges.
+        CRITICAL: Never collapses opposite edges (A -> B and B -> A) because that is a feedback loop!
+        Never collapses distinct branches from the same source node leaving from different handles.
+        """
+        retained: List[Dict[str, Any]] = []
 
         for e in edges:
-            src_id = e["source_id"]
-            tgt_id = e["target_id"]
-            src_el = el_map.get(src_id)
+            src = e["source_id"]
+            tgt = e["target_id"]
+            sh = e.get("source_handle", "auto")
+            th = e.get("target_handle", "auto")
+            p1 = e.get("p1", (0, 0))
+            p2 = e.get("p2", (0, 0))
 
-            canonical_pair = tuple(sorted([src_id, tgt_id]))
+            # Check if this edge is an exact duplicate of an already retained edge
+            is_dup = False
+            for existing in retained:
+                # Same source and target
+                if existing["source_id"] == src and existing["target_id"] == tgt:
+                    # Same attachment handles or endpoints within 25px
+                    ex_p1 = existing.get("p1", (0, 0))
+                    ex_p2 = existing.get("p2", (0, 0))
+                    dist_p1 = math.hypot(p1[0] - ex_p1[0], p1[1] - ex_p1[1])
+                    dist_p2 = math.hypot(p2[0] - ex_p2[0], p2[1] - ex_p2[1])
 
-            if canonical_pair not in pair_map:
-                pair_map[canonical_pair] = e
-            else:
-                # If new edge originates from a decision node, prefer it
-                if src_el and src_el.type == ElementType.DECISION:
-                    pair_map[canonical_pair] = e
+                    if dist_p1 < 30.0 and dist_p2 < 30.0:
+                        is_dup = True
+                        break
+                    if existing.get("source_handle") == sh and existing.get("target_handle") == th:
+                        is_dup = True
+                        break
 
-        return list(pair_map.values())
+            if not is_dup:
+                retained.append(e)
+
+        return retained
 
     @classmethod
     def _infer_fallback_connections(
@@ -348,24 +443,25 @@ class ConnectorExtractor:
         existing_edges: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        If elements exist without connectors (e.g. hand-drawn lines with small gaps),
-        infers topological flowchart sequence based on vertical ordering and start/end roles.
+        Connects disconnected components in standard sequential flowcharts only if
+        elements have zero incoming or outgoing connections.
         """
-        connected_pairs = {(e["source_id"], e["target_id"]) for e in existing_edges}
+        connected_sources = {e["source_id"] for e in existing_edges}
+        connected_targets = {e["target_id"] for e in existing_edges}
         
-        # Sort elements by Y coordinate (top to bottom)
         sorted_els = sorted(elements, key=lambda el: el.y)
-        
         new_edges = list(existing_edges)
+
         for i in range(len(sorted_els) - 1):
             s_el = sorted_els[i]
             t_el = sorted_els[i + 1]
 
-            # Don't connect if already connected or if s_el is an End node
             if s_el.role == "end":
                 continue
-            if (s_el.id, t_el.id) not in connected_pairs:
-                connected_pairs.add((s_el.id, t_el.id))
+            # If s_el has no outgoing edge and t_el has no incoming edge
+            if s_el.id not in connected_sources and t_el.id not in connected_targets:
+                connected_sources.add(s_el.id)
+                connected_targets.add(t_el.id)
                 new_edges.append({
                     "source_id": s_el.id,
                     "target_id": t_el.id,
@@ -383,3 +479,98 @@ class ConnectorExtractor:
                 })
 
         return new_edges
+
+    @classmethod
+    def _attach_labels_and_build(
+        cls,
+        deduped: List[Dict[str, Any]],
+        unassigned_text: List[OCRTextBlock],
+        elements: List[DiagramElement]
+    ) -> List[DiagramConnector]:
+        """
+        Attaches branch labels (e.g. Yes / No / conditions) by measuring perpendicular
+        distance to connector path segments and creates stable DiagramConnector models.
+        """
+        connectors: List[DiagramConnector] = []
+        used_text_indices: Set[int] = set()
+
+        for edge_info in deduped:
+            label = ""
+            mx, my = edge_info["midpoint"]
+            p1 = edge_info.get("p1", (mx, my))
+            p2 = edge_info.get("p2", (mx, my))
+            waypoints = edge_info.get("waypoints", [])
+
+            # Construct full path polyline: [p1, w1, w2, ..., p2]
+            poly = [p1] + [tuple(w) for w in waypoints] + [p2]
+
+            closest_tb_idx = -1
+            min_tb_dist = 90.0
+
+            for idx, tb in enumerate(unassigned_text):
+                if idx in used_text_indices:
+                    continue
+                tx_c = tb.x + tb.width / 2.0
+                ty_c = tb.y + tb.height / 2.0
+
+                # Perpendicular distance from text center to polyline segments
+                dist = cls._point_to_polyline_distance((tx_c, ty_c), poly)
+                if dist < min_tb_dist:
+                    min_tb_dist = dist
+                    closest_tb_idx = idx
+
+            if closest_tb_idx != -1:
+                used_text_indices.add(closest_tb_idx)
+                label = unassigned_text[closest_tb_idx].text
+
+            conn = DiagramConnector(
+                source_id=edge_info["source_id"],
+                target_id=edge_info["target_id"],
+                source_handle=edge_info.get("source_handle", "auto"),
+                target_handle=edge_info.get("target_handle", "auto"),
+                label=label,
+                direction=edge_info.get("direction", ConnectorDirection.DIRECTED),
+                routing=ConnectorStyle.ORTHOGONAL,
+                waypoints=[Point(x=float(pt[0]), y=float(pt[1])) for pt in waypoints],
+                style=ConnectorStyleProps(
+                    stroke="#2b3a42",
+                    stroke_width=2.0,
+                    arrow_head="classic"
+                ),
+                confidence=edge_info.get("confidence", 0.92),
+                uncertainty_status=UncertaintyStatus.LIKELY_CORRECT,
+                provenance={
+                    "detected_path_points": len(poly),
+                    "length": math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+                }
+            )
+            connectors.append(conn)
+
+        return connectors
+
+    @classmethod
+    def _point_to_polyline_distance(
+        cls,
+        pt: Tuple[float, float],
+        poly: List[Tuple[Any, Any]]
+    ) -> float:
+        """Calculates minimum distance from a point to a polyline."""
+        if len(poly) < 2:
+            return float("inf")
+        min_d = float("inf")
+        px, py = pt
+        for i in range(len(poly) - 1):
+            x1, y1 = poly[i]
+            x2, y2 = poly[i + 1]
+            seg_len_sq = (x2 - x1) ** 2 + (y2 - y1) ** 2
+            if seg_len_sq == 0:
+                d = math.hypot(px - x1, py - y1)
+            else:
+                # Project pt onto segment
+                t = max(0.0, min(1.0, ((px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)) / seg_len_sq))
+                proj_x = x1 + t * (x2 - x1)
+                proj_y = y1 + t * (y2 - y1)
+                d = math.hypot(px - proj_x, py - proj_y)
+            if d < min_d:
+                min_d = d
+        return min_d

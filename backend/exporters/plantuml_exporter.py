@@ -1,6 +1,10 @@
 """
-ODR PlantUML Exporter.
-Serializes CanonicalDiagram into clean PlantUML activity or component syntax.
+ODR PlantUML Exporter (Version 2.0).
+Serializes CanonicalDiagram into clean PlantUML syntax for:
+- Flowcharts (activity / component)
+- Sequence diagrams (@startuml ... participant ... -> ...)
+- Entity-Relationship diagrams (entity ... relationship ...)
+- Data Flow Diagrams
 """
 
 import re
@@ -18,66 +22,104 @@ class PlantUMLExporter:
 
     @classmethod
     def export(cls, diagram: CanonicalDiagram) -> Tuple[str, bool, str]:
-        lines = [
-            "@startuml",
-            "!theme plain",
-            "skinparam shadowing false",
-            "skinparam defaultFontName sans-serif",
-            f"title {diagram.name}",
-            ""
-        ]
+        family = diagram.family.value if hasattr(diagram.family, "value") else str(diagram.family)
+        family = family.lower()
 
-        if diagram.family == DiagramFamily.CHART:
-            lines.append("note over (Chart)")
-            lines.append(f"  Chart: {diagram.chart_data.title if diagram.chart_data else 'Chart'}")
-            lines.append("  PlantUML does not have a native chart renderer.")
-            lines.append("end note")
-            lines.append("@enduml")
+        if family in ("pie_chart", "bar_chart", "chart") and diagram.chart_data:
+            lines = [
+                "@startuml",
+                "!theme plain",
+                f"title {diagram.name}",
+                "note over (Chart)",
+                f"  Chart: {diagram.chart_data.title if diagram.chart_data else 'Chart'}",
+                "  PlantUML does not have a native chart renderer.",
+                "end note",
+                "@enduml"
+            ]
             return "\n".join(lines), True, "PlantUML note generated for chart"
 
-        element_map = {el.id: el for el in diagram.elements}
+        elif family == "sequence":
+            lines = [
+                "@startuml",
+                "!theme plain",
+                f"title {diagram.name}",
+                ""
+            ]
+            element_map = {el.id: el for el in diagram.elements}
+            for el in diagram.elements:
+                safe_id = cls._sanitize_id(el.id)
+                label = el.label.replace('"', "'").strip() or safe_id
+                lines.append(f'participant "{label}" as {safe_id}')
 
-        # Declare nodes
-        for el in diagram.elements:
-            safe_id = cls._sanitize_id(el.id)
-            label = el.label.replace('"', "'").strip() or safe_id
-            
-            if el.type == ElementType.DECISION:
-                lines.append(f'diamond "{label}" as {safe_id}')
-            elif el.type == ElementType.TERMINAL:
-                lines.append(f'circle "{label}" as {safe_id}')
-            elif el.type == ElementType.DATABASE:
-                lines.append(f'database "{label}" as {safe_id}')
-            elif el.type == ElementType.IO:
-                lines.append(f'entity "{label}" as {safe_id}')
-            else:
-                lines.append(f'rectangle "{label}" as {safe_id}')
+            lines.append("")
+            for conn in diagram.connectors:
+                if conn.source_id not in element_map or conn.target_id not in element_map:
+                    continue
+                src_id = cls._sanitize_id(conn.source_id)
+                tgt_id = cls._sanitize_id(conn.target_id)
+                label = conn.label.replace('"', "'").strip()
+                arrow = "-->" if conn.style.is_dashed else "->"
+                lines.append(f"{src_id} {arrow} {tgt_id} : {label}")
 
-        lines.append("")
+            lines.append("")
+            lines.append("@enduml")
+            return "\n".join(lines), True, "PlantUML sequence diagram exported"
 
-        # Declare connections
-        for conn in diagram.connectors:
-            if conn.source_id not in element_map or conn.target_id not in element_map:
-                continue
+        else:
+            lines = [
+                "@startuml",
+                "!theme plain",
+                "skinparam shadowing false",
+                "skinparam defaultFontName sans-serif",
+                f"title {diagram.name}",
+                ""
+            ]
 
-            src_id = cls._sanitize_id(conn.source_id)
-            tgt_id = cls._sanitize_id(conn.target_id)
-            label = conn.label.replace('"', "'").strip()
+            element_map = {el.id: el for el in diagram.elements}
 
-            arrow = "-->"
-            if conn.direction == ConnectorDirection.UNDIRECTED:
-                arrow = "--"
-            elif conn.direction == ConnectorDirection.BIDIRECTIONAL:
-                arrow = "<-->"
+            # Declare nodes
+            for el in diagram.elements:
+                safe_id = cls._sanitize_id(el.id)
+                label = el.label.replace('"', "'").strip() or safe_id
+                
+                if el.type in (ElementType.DECISION, ElementType.RELATIONSHIP):
+                    lines.append(f'diamond "{label}" as {safe_id}')
+                elif el.type == ElementType.TERMINAL:
+                    lines.append(f'circle "{label}" as {safe_id}')
+                elif el.type in (ElementType.DATABASE, ElementType.DATA_STORE):
+                    lines.append(f'database "{label}" as {safe_id}')
+                elif el.type in (ElementType.IO, ElementType.EXTERNAL_ENTITY):
+                    lines.append(f'entity "{label}" as {safe_id}')
+                elif el.type in (ElementType.ATTRIBUTE, ElementType.KEY_ATTRIBUTE):
+                    lines.append(f'storage "{label}" as {safe_id}')
+                else:
+                    lines.append(f'rectangle "{label}" as {safe_id}')
 
-            if label:
-                lines.append(f'{src_id} {arrow} {tgt_id} : {label}')
-            else:
-                lines.append(f'{src_id} {arrow} {tgt_id}')
+            lines.append("")
 
-        lines.append("")
-        lines.append("@enduml")
-        return "\n".join(lines), True, "PlantUML exported successfully"
+            # Declare connections
+            for conn in diagram.connectors:
+                if conn.source_id not in element_map or conn.target_id not in element_map:
+                    continue
+
+                src_id = cls._sanitize_id(conn.source_id)
+                tgt_id = cls._sanitize_id(conn.target_id)
+                label = conn.label.replace('"', "'").strip()
+
+                arrow = "-->"
+                if conn.direction == ConnectorDirection.UNDIRECTED:
+                    arrow = "--"
+                elif conn.direction == ConnectorDirection.BIDIRECTIONAL:
+                    arrow = "<-->"
+
+                if label:
+                    lines.append(f'{src_id} {arrow} {tgt_id} : {label}')
+                else:
+                    lines.append(f'{src_id} {arrow} {tgt_id}')
+
+            lines.append("")
+            lines.append("@enduml")
+            return "\n".join(lines), True, "PlantUML exported successfully"
 
     @classmethod
     def _sanitize_id(cls, raw_id: str) -> str:

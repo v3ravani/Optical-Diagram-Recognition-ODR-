@@ -41,11 +41,33 @@ class ElementType(str, Enum):
     CLASS_BOX = "class_box"
     NOTE = "note"
 
+    # DFD (Data Flow Diagram)
+    EXTERNAL_ENTITY = "external_entity"
+    DATA_STORE = "data_store"
+    DATA_FLOW = "data_flow"
+
+    # Sequence Diagram
+    LIFELINE = "lifeline"
+    ACTIVATION = "activation"
+    MESSAGE = "message"
+    RETURN_MESSAGE = "return_message"
+
+    # ERD (Entity-Relationship Diagram)
+    ENTITY = "entity"
+    ATTRIBUTE = "attribute"
+    RELATIONSHIP = "relationship"
+    KEY_ATTRIBUTE = "key_attribute"
+
 
 class DiagramFamily(str, Enum):
     FLOWCHART = "flowchart"
-    CHART = "chart"
-    UML = "uml"
+    DFD = "dfd"
+    SEQUENCE = "sequence"
+    ERD = "erd"
+    BAR_CHART = "bar_chart"
+    PIE_CHART = "pie_chart"
+    CHART = "chart"      # Backwards compatibility alias
+    UML = "uml"          # Backwards compatibility alias
     GENERIC = "generic"
 
 
