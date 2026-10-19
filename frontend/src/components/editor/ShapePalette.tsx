@@ -1,12 +1,13 @@
 import React from 'react';
 import { ElementType } from '../../types/diagram';
-import { Square, Diamond, Circle, Database, FileText, ArrowRightCircle } from 'lucide-react';
+import { Square, Diamond, Circle, Database, FileText, ArrowRightCircle, BarChart3, PieChart } from 'lucide-react';
 
 interface ShapePaletteProps {
   onAddShape: (type: ElementType, label: string) => void;
+  onAddChart?: (type: 'bar' | 'pie') => void;
 }
 
-export const ShapePalette: React.FC<ShapePaletteProps> = ({ onAddShape }) => {
+export const ShapePalette: React.FC<ShapePaletteProps> = ({ onAddShape, onAddChart }) => {
   const shapes: Array<{ type: ElementType; label: string; icon: React.ReactNode }> = [
     {
       type: 'terminal',
@@ -59,6 +60,28 @@ export const ShapePalette: React.FC<ShapePaletteProps> = ({ onAddShape }) => {
           <span>{s.label}</span>
         </div>
       ))}
+
+      {onAddChart && (
+        <>
+          <div className="palette-section-title" style={{ marginTop: '16px' }}>Data Charts</div>
+          <div
+            className="palette-item"
+            onClick={() => onAddChart('bar')}
+            title="Create Bar Graph"
+          >
+            <div className="palette-shape-icon"><BarChart3 size={16} /></div>
+            <span>Bar Graph</span>
+          </div>
+          <div
+            className="palette-item"
+            onClick={() => onAddChart('pie')}
+            title="Create Pie Chart"
+          >
+            <div className="palette-shape-icon"><PieChart size={16} /></div>
+            <span>Pie Chart</span>
+          </div>
+        </>
+      )}
     </aside>
   );
 };

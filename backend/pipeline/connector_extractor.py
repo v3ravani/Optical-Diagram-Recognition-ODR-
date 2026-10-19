@@ -142,16 +142,20 @@ class ConnectorExtractor:
             label = ""
             mx, my = edge_info["midpoint"]
             
-            # Find closest unassigned text within 60px of the edge midpoint or path
+            # Find closest unassigned text within 120px of any point along the connector
             closest_tb_idx = -1
-            min_tb_dist = 65.0
+            min_tb_dist = 120.0
+
+            p1 = edge_info.get("p1", (mx, my))
+            p2 = edge_info.get("p2", (mx, my))
+            check_points = [p1, p2, (mx, my)] + edge_info.get("waypoints", [])
 
             for idx, tb in enumerate(unassigned_text):
                 if idx in used_text_indices:
                     continue
                 tx_c = tb.x + tb.width / 2.0
                 ty_c = tb.y + tb.height / 2.0
-                dist = math.hypot(mx - tx_c, my - ty_c)
+                dist = min(math.hypot(cpx - tx_c, cpy - ty_c) for cpx, cpy in check_points)
                 if dist < min_tb_dist:
                     min_tb_dist = dist
                     closest_tb_idx = idx
@@ -258,15 +262,34 @@ class ConnectorExtractor:
         d1 = window_density(p1)
         d2 = window_density(p2)
 
-        # Arrowheads typically have higher local triangular density
-        if d2 > d1 * 1.3:
+        # 1. Topological constraints based on node roles
+        # Start node: only outgoing edges
+        if source_el.role == "start" and target_el.role != "start":
+            return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
+        if target_el.role == "start" and source_el.role != "start":
+            return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
+
+        # End node: only incoming edges
+        if target_el.role == "end" and source_el.role != "end":
+            return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
+        if source_el.role == "end" and target_el.role != "end":
+            return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
+
+        # Decision diamond: branching source
+        if source_el.type == ElementType.DECISION and target_el.type != ElementType.DECISION:
+            return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
+        if target_el.type == ElementType.DECISION and source_el.type != ElementType.DECISION and d1 > d2:
+            return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
+
+        # 2. Local pixel density check for arrowhead triangle
+        if d2 > d1 * 1.25:
             # Arrow is at p2, pointing into target_el
             return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
-        elif d1 > d2 * 1.3:
+        elif d1 > d2 * 1.25:
             # Arrow is at p1, pointing into source_el (so direction is reversed)
             return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
 
-        # Default flow: downward / rightward flow in flowcharts
+        # 3. Default flow: downward / rightward flow in flowcharts
         cy_src = source_el.y + source_el.height / 2.0
         cy_tgt = target_el.y + target_el.height / 2.0
         if cy_src <= cy_tgt:

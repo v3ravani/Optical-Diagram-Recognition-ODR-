@@ -248,6 +248,32 @@ export function App() {
     setSelectedElementId(newElement.id);
   };
 
+  // Shape Palette Add Data Chart
+  const handleAddChart = (chartType: 'bar' | 'pie') => {
+    if (!diagram) return;
+    const newChartData = {
+      chart_type: chartType,
+      title: chartType === 'pie' ? 'Distribution Breakdown' : 'Comparative Analysis',
+      x_axis_label: 'Categories',
+      y_axis_label: 'Values',
+      categories: chartType === 'pie' ? ['Segment A', 'Segment B', 'Segment C', 'Segment D'] : ['Q1', 'Q2', 'Q3', 'Q4'],
+      series: [{
+        name: 'Series 1',
+        values: chartType === 'pie' ? [40, 30, 20, 10] : [25, 40, 35, 50],
+        color: '#3b82f6'
+      }],
+      is_estimated: false,
+      confidence: 1.0
+    };
+    updateDiagram({
+      ...diagram,
+      family: 'chart',
+      subtype: chartType === 'pie' ? 'pie_chart' : 'bar_chart',
+      chart_data: newChartData,
+      name: newChartData.title
+    }, true);
+  };
+
   // Delete Element
   const handleDeleteElement = (id: string) => {
     if (!diagram) return;
@@ -583,11 +609,11 @@ export function App() {
           />
 
           <div className="editor-body">
-            <ShapePalette onAddShape={handleAddShape} />
+            <ShapePalette onAddShape={handleAddShape} onAddChart={handleAddChart} />
 
             <DiagramCanvas
               diagram={diagram}
-              onChange={(updated) => updateDiagram(updated, false)}
+              onChange={(updated, pushHistory) => updateDiagram(updated, pushHistory ?? false)}
               selectedElementId={selectedElementId}
               selectedConnectorId={selectedConnectorId}
               onSelectElement={setSelectedElementId}
@@ -618,6 +644,15 @@ export function App() {
                 setSelectedElementId(elId);
                 setHighlightedElementId(elId);
                 setTimeout(() => setHighlightedElementId(null), 2500);
+              }}
+              onUpdateChartData={(chartData) => {
+                updateDiagram({
+                  ...diagram,
+                  family: 'chart',
+                  subtype: chartData.chart_type === 'pie' ? 'pie_chart' : 'bar_chart',
+                  chart_data: chartData,
+                  name: chartData.title ? `${chartData.title} (${chartData.chart_type === 'pie' ? 'Pie Chart' : 'Bar Chart'})` : diagram.name
+                }, true);
               }}
             />
           </div>

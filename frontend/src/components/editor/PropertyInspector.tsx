@@ -5,9 +5,18 @@ import {
   DiagramConnector,
   ElementType,
   ConnectorDirection,
-  ConnectorStyle
+  ConnectorStyle,
+  ChartData
 } from '../../types/diagram';
-import { Trash2, Lock, Unlock, AlertTriangle, Info, CheckCircle2 } from 'lucide-react';
+import {
+  Trash2,
+  AlertTriangle,
+  CheckCircle2,
+  ArrowRightLeft,
+  Plus,
+  BarChart3,
+  PieChart as PieIcon
+} from 'lucide-react';
 
 interface PropertyInspectorProps {
   diagram: CanonicalDiagram;
@@ -19,7 +28,13 @@ interface PropertyInspectorProps {
   onDeleteConnector: (id: string) => void;
   onUpdateDiagramName: (name: string) => void;
   onFocusIssueElement: (elementId: string) => void;
+  onUpdateChartData?: (chartData: ChartData) => void;
 }
+
+const DEFAULT_CHART_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6'
+];
 
 export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
   diagram,
@@ -30,7 +45,8 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
   onUpdateConnector,
   onDeleteConnector,
   onUpdateDiagramName,
-  onFocusIssueElement
+  onFocusIssueElement,
+  onUpdateChartData
 }) => {
   const selectedElement = diagram.elements.find((el) => el.id === selectedElementId);
   const selectedConnector = diagram.connectors.find((c) => c.id === selectedConnectorId);
@@ -132,7 +148,7 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
                 type="number"
                 className="field-input"
                 value={selectedElement.width}
-                onChange={(e) => onUpdateElement({ ...selectedElement, width: Math.max(40, parseFloat(e.target.value) || 40) })}
+                onChange={(e) => onUpdateElement({ ...selectedElement, width: Math.max(20, parseFloat(e.target.value) || 20) })}
               />
             </div>
             <div className="inspector-field">
@@ -141,7 +157,7 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
                 type="number"
                 className="field-input"
                 value={selectedElement.height}
-                onChange={(e) => onUpdateElement({ ...selectedElement, height: Math.max(30, parseFloat(e.target.value) || 30) })}
+                onChange={(e) => onUpdateElement({ ...selectedElement, height: Math.max(20, parseFloat(e.target.value) || 20) })}
               />
             </div>
           </div>
@@ -188,16 +204,24 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
     );
   }
 
-  // 2. Connector Inspector
+  // 2. Connector / Arrow Inspector
   if (selectedConnector) {
+    const handleSwapDirection = () => {
+      onUpdateConnector({
+        ...selectedConnector,
+        source_id: selectedConnector.target_id,
+        target_id: selectedConnector.source_id
+      });
+    };
+
     return (
       <aside className="property-inspector">
         <div className="inspector-header">
-          <span className="inspector-title">Connector Properties</span>
+          <span className="inspector-title">Arrow / Connector</span>
           <button
             className="btn-icon"
             onClick={() => onDeleteConnector(selectedConnector.id)}
-            title="Delete Connector"
+            title="Delete Connector (Del)"
             style={{ color: 'var(--color-error)' }}
           >
             <Trash2 size={15} />
@@ -206,11 +230,11 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
 
         <div className="inspector-body">
           <div className="inspector-field">
-            <label className="field-label">Branch / Edge Label</label>
+            <label className="field-label">Branch Label (e.g. Yes / No)</label>
             <input
               type="text"
               className="field-input"
-              placeholder="e.g. Yes, No, True"
+              placeholder="e.g. Yes, No, True, Retry"
               value={selectedConnector.label}
               onChange={(e) => onUpdateConnector({ ...selectedConnector, label: e.target.value })}
             />
@@ -218,27 +242,93 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
 
           <div className="inspector-field">
             <label className="field-label">Direction</label>
-            <select
-              className="field-input"
-              value={selectedConnector.direction}
-              onChange={(e) => onUpdateConnector({ ...selectedConnector, direction: e.target.value as ConnectorDirection })}
-            >
-              <option value="directed">Directed (Source → Target)</option>
-              <option value="bidirectional">Bidirectional (Source ↔ Target)</option>
-              <option value="undirected">Undirected (Line)</option>
-            </select>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <select
+                className="field-input"
+                style={{ flex: 1 }}
+                value={selectedConnector.direction}
+                onChange={(e) => onUpdateConnector({ ...selectedConnector, direction: e.target.value as ConnectorDirection })}
+              >
+                <option value="directed">Directed (→)</option>
+                <option value="bidirectional">Bidirectional (↔)</option>
+                <option value="undirected">Undirected (—)</option>
+              </select>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '0 8px' }}
+                onClick={handleSwapDirection}
+                title="Reverse Direction (Swap Source & Target)"
+              >
+                <ArrowRightLeft size={14} />
+              </button>
+            </div>
           </div>
 
-          <div className="inspector-field">
-            <label className="field-label">Routing Style</label>
-            <select
-              className="field-input"
-              value={selectedConnector.routing}
-              onChange={(e) => onUpdateConnector({ ...selectedConnector, routing: e.target.value as ConnectorStyle })}
-            >
-              <option value="orthogonal">Orthogonal</option>
-              <option value="straight">Straight</option>
-            </select>
+          <div className="field-row">
+            <div className="inspector-field">
+              <label className="field-label">Routing Style</label>
+              <select
+                className="field-input"
+                value={selectedConnector.routing}
+                onChange={(e) => onUpdateConnector({ ...selectedConnector, routing: e.target.value as ConnectorStyle })}
+              >
+                <option value="orthogonal">Orthogonal</option>
+                <option value="straight">Straight</option>
+              </select>
+            </div>
+            <div className="inspector-field">
+              <label className="field-label">Line Style</label>
+              <select
+                className="field-input"
+                value={selectedConnector.style.is_dashed ? 'dashed' : 'solid'}
+                onChange={(e) =>
+                  onUpdateConnector({
+                    ...selectedConnector,
+                    style: { ...selectedConnector.style, is_dashed: e.target.value === 'dashed' }
+                  })
+                }
+              >
+                <option value="solid">Solid</option>
+                <option value="dashed">Dashed</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="field-row">
+            <div className="inspector-field">
+              <label className="field-label">Arrow Color</label>
+              <input
+                type="color"
+                className="field-input"
+                style={{ padding: '2px 4px', height: '32px' }}
+                value={selectedConnector.style.stroke}
+                onChange={(e) =>
+                  onUpdateConnector({
+                    ...selectedConnector,
+                    style: { ...selectedConnector.style, stroke: e.target.value }
+                  })
+                }
+              />
+            </div>
+            <div className="inspector-field">
+              <label className="field-label">Stroke Width</label>
+              <select
+                className="field-input"
+                value={selectedConnector.style.stroke_width}
+                onChange={(e) =>
+                  onUpdateConnector({
+                    ...selectedConnector,
+                    style: { ...selectedConnector.style, stroke_width: parseFloat(e.target.value) || 2 }
+                  })
+                }
+              >
+                <option value="1.5">1.5px (Thin)</option>
+                <option value="2">2px (Default)</option>
+                <option value="3">3px (Thick)</option>
+                <option value="4">4px (Bold)</option>
+              </select>
+            </div>
           </div>
 
           <div className="inspector-field">
@@ -275,7 +365,222 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
     );
   }
 
-  // 3. Diagram Overview Inspector
+  // 3. Chart Editor Inspector (If diagram is chart family or has chart_data)
+  if (diagram.chart_data || diagram.family === 'chart') {
+    const cd = diagram.chart_data || {
+      chart_type: 'bar',
+      title: 'Data Chart',
+      x_axis_label: 'Categories',
+      y_axis_label: 'Values',
+      categories: ['A', 'B', 'C'],
+      series: [{ name: 'Series 1', values: [10, 25, 15], color: '#3b82f6' }],
+      is_estimated: true,
+      confidence: 0.9
+    };
+
+    const handleUpdateTitle = (title: string) => {
+      if (onUpdateChartData) {
+        onUpdateChartData({ ...cd, title });
+      }
+    };
+
+    const handleUpdateType = (chart_type: 'bar' | 'pie') => {
+      if (onUpdateChartData) {
+        onUpdateChartData({ ...cd, chart_type });
+      }
+    };
+
+    const handleUpdateCategory = (idx: number, name: string) => {
+      const updatedCats = [...cd.categories];
+      updatedCats[idx] = name;
+      if (onUpdateChartData) {
+        onUpdateChartData({ ...cd, categories: updatedCats });
+      }
+    };
+
+    const handleUpdateValue = (idx: number, val: number) => {
+      const s0 = cd.series[0] || { name: 'Series 1', values: [], color: '#3b82f6' };
+      const updatedVals = [...s0.values];
+      updatedVals[idx] = val;
+      if (onUpdateChartData) {
+        onUpdateChartData({
+          ...cd,
+          series: [{ ...s0, values: updatedVals }]
+        });
+      }
+    };
+
+    const handleDeleteItem = (idx: number) => {
+      const updatedCats = cd.categories.filter((_, i) => i !== idx);
+      const s0 = cd.series[0] || { name: 'Series 1', values: [], color: '#3b82f6' };
+      const updatedVals = s0.values.filter((_, i) => i !== idx);
+      if (onUpdateChartData) {
+        onUpdateChartData({
+          ...cd,
+          categories: updatedCats,
+          series: [{ ...s0, values: updatedVals }]
+        });
+      }
+    };
+
+    const handleAddItem = () => {
+      const newIdx = cd.categories.length + 1;
+      const updatedCats = [...cd.categories, `Item ${newIdx}`];
+      const s0 = cd.series[0] || { name: 'Series 1', values: [], color: '#3b82f6' };
+      const updatedVals = [...s0.values, 20.0];
+      if (onUpdateChartData) {
+        onUpdateChartData({
+          ...cd,
+          categories: updatedCats,
+          series: [{ ...s0, values: updatedVals }]
+        });
+      }
+    };
+
+    const s0Values = cd.series[0]?.values || [];
+
+    return (
+      <aside className="property-inspector">
+        <div className="inspector-header">
+          <span className="inspector-title">Chart Editor</span>
+        </div>
+
+        <div className="inspector-body">
+          {/* Chart Type Toggle */}
+          <div className="inspector-field">
+            <label className="field-label">Chart Type</label>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+              <button
+                type="button"
+                className={`btn ${cd.chart_type === 'bar' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '6px' }}
+                onClick={() => handleUpdateType('bar')}
+              >
+                <BarChart3 size={14} /> Bar Graph
+              </button>
+              <button
+                type="button"
+                className={`btn ${cd.chart_type === 'pie' ? 'btn-primary' : 'btn-secondary'}`}
+                style={{ padding: '6px' }}
+                onClick={() => handleUpdateType('pie')}
+              >
+                <PieIcon size={14} /> Pie Chart
+              </button>
+            </div>
+          </div>
+
+          <div className="inspector-field">
+            <label className="field-label">Chart Title</label>
+            <input
+              type="text"
+              className="field-input"
+              value={cd.title || ''}
+              onChange={(e) => handleUpdateTitle(e.target.value)}
+              placeholder="e.g. Market Share or Monthly Sales"
+            />
+          </div>
+
+          {cd.chart_type === 'bar' && (
+            <div className="field-row">
+              <div className="inspector-field">
+                <label className="field-label">X-Axis Label</label>
+                <input
+                  type="text"
+                  className="field-input"
+                  value={cd.x_axis_label || ''}
+                  onChange={(e) => onUpdateChartData && onUpdateChartData({ ...cd, x_axis_label: e.target.value })}
+                />
+              </div>
+              <div className="inspector-field">
+                <label className="field-label">Y-Axis Label</label>
+                <input
+                  type="text"
+                  className="field-input"
+                  value={cd.y_axis_label || ''}
+                  onChange={(e) => onUpdateChartData && onUpdateChartData({ ...cd, y_axis_label: e.target.value })}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Slices / Categories Data Table */}
+          <div className="inspector-field">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <label className="field-label" style={{ margin: 0 }}>
+                {cd.chart_type === 'pie' ? 'Slices & Proportions' : 'Bars & Values'}
+              </label>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                style={{ padding: '2px 8px', fontSize: '11px', height: '24px' }}
+                onClick={handleAddItem}
+              >
+                <Plus size={12} /> Add
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '280px', overflowY: 'auto' }}>
+              {cd.categories.map((cat, idx) => {
+                const val = s0Values[idx] ?? 0;
+                const color = DEFAULT_CHART_COLORS[idx % DEFAULT_CHART_COLORS.length];
+
+                return (
+                  <div
+                    key={idx}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '4px 6px',
+                      borderRadius: '6px',
+                      background: 'var(--bg-subtle)',
+                      border: '1px solid var(--border-subtle)'
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '12px',
+                        height: '12px',
+                        borderRadius: '3px',
+                        background: color,
+                        flexShrink: 0
+                      }}
+                    />
+                    <input
+                      type="text"
+                      className="field-input"
+                      style={{ flex: 2, padding: '4px', fontSize: '12px' }}
+                      value={cat}
+                      onChange={(e) => handleUpdateCategory(idx, e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      className="field-input"
+                      style={{ flex: 1, padding: '4px', fontSize: '12px', textAlign: 'right' }}
+                      value={val}
+                      onChange={(e) => handleUpdateValue(idx, parseFloat(e.target.value) || 0)}
+                    />
+                    {cd.chart_type === 'pie' && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>%</span>}
+                    <button
+                      type="button"
+                      className="btn-icon"
+                      style={{ color: 'var(--color-error)', padding: '2px' }}
+                      onClick={() => handleDeleteItem(idx)}
+                      title="Delete Item"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
+  // 4. Default: Diagram Overview Inspector
   return (
     <aside className="property-inspector">
       <div className="inspector-header">

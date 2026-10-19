@@ -24,6 +24,11 @@ interface DiagramCanvasProps {
 const GRID_SNAP = 10;
 const snapToGrid = (val: number) => Math.round(val / GRID_SNAP) * GRID_SNAP;
 
+const CHART_COLORS = [
+  '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
+  '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6'
+];
+
 export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   diagram,
   onChange,
@@ -58,9 +63,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const [connectorStartNodeId, setConnectorStartNodeId] = useState<string | null>(null);
   const [tempConnectorEnd, setTempConnectorEnd] = useState<{ x: number; y: number } | null>(null);
 
-  // Inline editing
+  // Inline node editing
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+
+  // Inline connector label editing
+  const [editingConnectorId, setEditingConnectorId] = useState<string | null>(null);
+  const [editingConnectorText, setEditingConnectorText] = useState('');
 
   // Transform screen coordinate to canvas coordinate
   const screenToCanvas = useCallback(
@@ -110,6 +119,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       onSelectElement(null);
       onSelectConnector(null);
       setEditingNodeId(null);
+      setEditingConnectorId(null);
     }
   };
 
@@ -192,7 +202,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   // Handle Mouse Up on Container
   const handleMouseUp = () => {
     if (draggingNodeId && hasMovedDuringDrag) {
-      // Commit final position to history snapshot
       onChange(diagram, true);
     }
     setIsPanning(false);
@@ -229,7 +238,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     e.stopPropagation();
 
     if (connectorStartNodeId && connectorStartNodeId !== targetNode.id) {
-      // Create new directed connector between nodes
       const newConn: DiagramConnector = {
         id: `conn_${Date.now().toString(36)}`,
         source_id: connectorStartNodeId,
@@ -251,11 +259,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         connectors: [...diagram.connectors, newConn]
       }, true);
     } else if (draggingNodeId && hasMovedDuringDrag) {
-      // Commit final position to history
       onChange(diagram, true);
     }
 
-    // Ensure all drag & draw states are unconditionally cleared
     setDraggingNodeId(null);
     setResizingNodeId(null);
     setResizeHandle(null);
@@ -296,6 +302,23 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     }
   };
 
+  // Inline connector label edit
+  const startEditingConnector = (e: React.MouseEvent, conn: DiagramConnector) => {
+    e.stopPropagation();
+    setEditingConnectorId(conn.id);
+    setEditingConnectorText(conn.label);
+  };
+
+  const commitEditingConnector = () => {
+    if (editingConnectorId) {
+      const updatedConnectors = diagram.connectors.map((c) =>
+        c.id === editingConnectorId ? { ...c, label: editingConnectorText } : c
+      );
+      onChange({ ...diagram, connectors: updatedConnectors }, true);
+      setEditingConnectorId(null);
+    }
+  };
+
   // Start connector from anchor port
   const startConnectorFromPort = (e: React.MouseEvent, nodeId: string) => {
     e.stopPropagation();
@@ -316,49 +339,268 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     const dx = tgtCx - srcCx;
     const dy = tgtCy - srcCy;
 
-    // Determine primary relative orientation
     if (Math.abs(dx) > Math.abs(dy) * 1.2) {
-      // Horizontal flow
       if (dx > 0) {
-        // Target is to the right
-        return {
-          sx: src.x + src.width,
-          sy: srcCy,
-          tx: tgt.x,
-          ty: tgtCy,
-          orientation: 'horizontal'
-        };
+        return { sx: src.x + src.width, sy: srcCy, tx: tgt.x, ty: tgtCy, orientation: 'horizontal' };
       } else {
-        // Target is to the left
-        return {
-          sx: src.x,
-          sy: srcCy,
-          tx: tgt.x + tgt.width,
-          ty: tgtCy,
-          orientation: 'horizontal'
-        };
+        return { sx: src.x, sy: srcCy, tx: tgt.x + tgt.width, ty: tgtCy, orientation: 'horizontal' };
       }
     } else {
-      // Vertical flow
       if (dy > 0) {
-        // Target is below
-        return {
-          sx: srcCx,
-          sy: src.y + src.height,
-          tx: tgtCx,
-          ty: tgt.y,
-          orientation: 'vertical'
-        };
+        return { sx: srcCx, sy: src.y + src.height, tx: tgtCx, ty: tgt.y, orientation: 'vertical' };
       } else {
-        // Target is above
-        return {
-          sx: srcCx,
-          sy: src.y,
-          tx: tgtCx,
-          ty: tgt.y + tgt.height,
-          orientation: 'vertical'
-        };
+        return { sx: srcCx, sy: src.y, tx: tgtCx, ty: tgt.y + tgt.height, orientation: 'vertical' };
       }
+    }
+  };
+
+  // Render Chart Data (Bar Chart or Pie Chart)
+  const renderChart = () => {
+    const cd = diagram.chart_data;
+    if (!cd) return null;
+
+    if (cd.chart_type === 'pie') {
+      const categories = cd.categories;
+      const values = cd.series[0]?.values || [];
+      const total = values.reduce((sum, v) => sum + Math.max(0, v), 0) || 1;
+      const cx = 450;
+      const cy = 340;
+      const R = 180;
+
+      let currentAngle = -Math.PI / 2;
+      const slices = values.map((val, i) => {
+        const sweep = (Math.max(0, val) / total) * 2 * Math.PI;
+        const start = currentAngle;
+        const end = currentAngle + sweep;
+        currentAngle = end;
+
+        const x1 = cx + R * Math.cos(start);
+        const y1 = cy + R * Math.sin(start);
+        const x2 = cx + R * Math.cos(end);
+        const y2 = cy + R * Math.sin(end);
+        const largeArc = sweep > Math.PI ? 1 : 0;
+        const pathD = `M ${cx} ${cy} L ${x1} ${y1} A ${R} ${R} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+
+        const mid = (start + end) / 2;
+        const lx = cx + (R + 32) * Math.cos(mid);
+        const ly = cy + (R + 32) * Math.sin(mid);
+        const pct = Math.round((Math.max(0, val) / total) * 100);
+
+        return {
+          pathD,
+          category: categories[i] || `Slice ${i + 1}`,
+          value: val,
+          pct,
+          lx,
+          ly,
+          color: CHART_COLORS[i % CHART_COLORS.length]
+        };
+      });
+
+      return (
+        <g className="chart-group">
+          {/* Chart Title */}
+          <text
+            x={cx}
+            y={80}
+            textAnchor="middle"
+            fill="#0f172a"
+            fontSize="22"
+            fontWeight="600"
+          >
+            {cd.title || 'Pie Chart'}
+          </text>
+
+          {/* Slices */}
+          {slices.map((s, idx) => (
+            <g key={idx} style={{ cursor: 'pointer' }}>
+              <path
+                d={s.pathD}
+                fill={s.color}
+                stroke="#ffffff"
+                strokeWidth="2.5"
+                style={{ transition: 'all 0.2s ease' }}
+              />
+              <text
+                x={s.lx}
+                y={s.ly}
+                textAnchor="middle"
+                dominantBaseline="central"
+                fill="#334155"
+                fontSize="12"
+                fontWeight="600"
+              >
+                {s.category} ({s.pct}%)
+              </text>
+            </g>
+          ))}
+
+          {/* Legend */}
+          <g transform={`translate(${cx + R + 90}, ${cy - 120})`}>
+            {slices.map((s, idx) => (
+              <g key={idx} transform={`translate(0, ${idx * 28})`}>
+                <rect width="14" height="14" rx="3" fill={s.color} />
+                <text x="22" y="11" fill="#1e293b" fontSize="13" fontWeight="500">
+                  {s.category}: {s.value} ({s.pct}%)
+                </text>
+              </g>
+            ))}
+          </g>
+        </g>
+      );
+    } else {
+      // Bar Chart
+      const categories = cd.categories;
+      const values = cd.series[0]?.values || [];
+      const originX = 180;
+      const originY = 520;
+      const plotWidth = 620;
+      const plotHeight = 360;
+      const maxVal = Math.max(...values, 1) * 1.15;
+
+      const n = Math.max(1, categories.length);
+      const barW = Math.min(80, Math.max(28, (plotWidth - 40) / n - 20));
+      const gap = (plotWidth - barW * n) / (n + 1);
+
+      // Y-axis ticks
+      const ticks = [0, 0.25, 0.5, 0.75, 1.0];
+
+      return (
+        <g className="chart-group">
+          {/* Title */}
+          <text
+            x={originX + plotWidth / 2}
+            y={80}
+            textAnchor="middle"
+            fill="#0f172a"
+            fontSize="22"
+            fontWeight="600"
+          >
+            {cd.title || 'Bar Chart'}
+          </text>
+
+          {/* Horizontal Grid Lines & Y Ticks */}
+          {ticks.map((t, idx) => {
+            const gy = originY - t * plotHeight;
+            const tickVal = Math.round(t * maxVal);
+            return (
+              <g key={idx}>
+                <line
+                  x1={originX}
+                  y1={gy}
+                  x2={originX + plotWidth}
+                  y2={gy}
+                  stroke="#e2e8f0"
+                  strokeWidth="1"
+                  strokeDasharray="4 4"
+                />
+                <text
+                  x={originX - 12}
+                  y={gy + 4}
+                  textAnchor="end"
+                  fill="#64748b"
+                  fontSize="11"
+                  fontWeight="500"
+                >
+                  {tickVal}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Axes */}
+          <line
+            x1={originX}
+            y1={originY}
+            x2={originX + plotWidth}
+            y2={originY}
+            stroke="#475569"
+            strokeWidth="2"
+          />
+          <line
+            x1={originX}
+            y1={originY}
+            x2={originX}
+            y2={originY - plotHeight}
+            stroke="#475569"
+            strokeWidth="2"
+          />
+
+          {/* Y Axis Label */}
+          {cd.y_axis_label && (
+            <text
+              x={originX - 45}
+              y={originY - plotHeight / 2}
+              textAnchor="middle"
+              fill="#475569"
+              fontSize="12"
+              fontWeight="600"
+              transform={`rotate(-90, ${originX - 45}, ${originY - plotHeight / 2})`}
+            >
+              {cd.y_axis_label}
+            </text>
+          )}
+
+          {/* Bars */}
+          {categories.map((cat, i) => {
+            const val = values[i] ?? 0;
+            const barH = (Math.max(0, val) / maxVal) * plotHeight;
+            const bx = originX + gap * (i + 1) + barW * i;
+            const by = originY - barH;
+            const color = CHART_COLORS[i % CHART_COLORS.length];
+
+            return (
+              <g key={i}>
+                <rect
+                  x={bx}
+                  y={by}
+                  width={barW}
+                  height={barH}
+                  rx="4"
+                  fill={color}
+                  style={{ transition: 'all 0.2s ease', cursor: 'pointer' }}
+                />
+                {/* Value on top of bar */}
+                <text
+                  x={bx + barW / 2}
+                  y={by - 8}
+                  textAnchor="middle"
+                  fill="#1e293b"
+                  fontSize="12"
+                  fontWeight="600"
+                >
+                  {val}
+                </text>
+                {/* Category label below X-axis */}
+                <text
+                  x={bx + barW / 2}
+                  y={originY + 20}
+                  textAnchor="middle"
+                  fill="#334155"
+                  fontSize="12"
+                  fontWeight="500"
+                >
+                  {cat}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* X Axis Label */}
+          {cd.x_axis_label && (
+            <text
+              x={originX + plotWidth / 2}
+              y={originY + 48}
+              textAnchor="middle"
+              fill="#475569"
+              fontSize="12"
+              fontWeight="600"
+            >
+              {cd.x_axis_label}
+            </text>
+          )}
+        </g>
+      );
     }
   };
 
@@ -401,7 +643,10 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           </marker>
         </defs>
 
-        {/* 1. Render Connectors */}
+        {/* 1. Render Chart if Diagram is a Data Chart */}
+        {diagram.chart_data && renderChart()}
+
+        {/* 2. Render Connectors (if Flowchart) */}
         {diagram.connectors.map((conn) => {
           const src = elementMap.get(conn.source_id);
           const tgt = elementMap.get(conn.target_id);
@@ -417,7 +662,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           if (conn.routing === 'straight') {
             pathD = `M ${sx} ${sy} L ${tx} ${ty}`;
           } else {
-            // Adaptive orthogonal routing
             if (orientation === 'horizontal') {
               const midX = (sx + tx) / 2;
               pathD = `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`;
@@ -441,28 +685,61 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               }}
               style={{ cursor: 'pointer' }}
             >
-              {/* Invisible wider stroke for easy clicking */}
+              {/* Invisible wider hit-target stroke */}
               <path
                 d={pathD}
                 fill="none"
                 stroke="transparent"
-                strokeWidth="12"
+                strokeWidth="14"
               />
               <path
                 d={pathD}
                 className={`connector-line ${isSelected ? 'selected' : ''}`}
+                stroke={isSelected ? '#0f766e' : conn.style.stroke}
+                strokeWidth={isSelected ? 3 : conn.style.stroke_width}
+                strokeDasharray={conn.style.is_dashed ? '5 4' : 'none'}
                 markerEnd={isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)'}
               />
-              {conn.label && (
-                <g transform={`translate(${labelX}, ${labelY})`}>
-                  <rect
-                    x={-24}
-                    y={-12}
-                    width={48}
-                    height={24}
-                    className="edge-label-box"
-                  />
-                  <text className="edge-label-text">{conn.label}</text>
+
+              {/* Edge Label */}
+              {(conn.label || editingConnectorId === conn.id) && (
+                <g transform={`translate(${labelX}, ${labelY})`} onDoubleClick={(e) => startEditingConnector(e, conn)}>
+                  {editingConnectorId === conn.id ? (
+                    <foreignObject x={-40} y={-16} width={80} height={32}>
+                      <input
+                        autoFocus
+                        type="text"
+                        value={editingConnectorText}
+                        onChange={(e) => setEditingConnectorText(e.target.value)}
+                        onBlur={commitEditingConnector}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEditingConnector();
+                          else if (e.key === 'Escape') setEditingConnectorId(null);
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          fontSize: '11px',
+                          textAlign: 'center',
+                          border: '1.5px solid #0f766e',
+                          borderRadius: '4px',
+                          outline: 'none',
+                          background: '#ffffff'
+                        }}
+                      />
+                    </foreignObject>
+                  ) : (
+                    <>
+                      <rect
+                        x={-28}
+                        y={-12}
+                        width={56}
+                        height={24}
+                        className="edge-label-box"
+                      />
+                      <text className="edge-label-text">{conn.label}</text>
+                    </>
+                  )}
                 </g>
               )}
             </g>
@@ -483,7 +760,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           />
         )}
 
-        {/* 2. Render Diagram Elements */}
+        {/* 3. Render Diagram Elements */}
         {diagram.elements.map((el) => {
           const isSelected = selectedElementId === el.id;
           const isHighlighted = highlightedElementId === el.id;
@@ -663,7 +940,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               {/* Anchor connection ports (appear on hover, selection, or connector tool) */}
               {(isSelected || isHovered || activeTool === 'connector') && (
                 <>
-                  {/* Top port */}
                   <circle
                     cx={el.width / 2}
                     cy={0}
@@ -671,7 +947,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                     className="anchor-port"
                     onMouseDown={(e) => startConnectorFromPort(e, el.id)}
                   />
-                  {/* Right port */}
                   <circle
                     cx={el.width}
                     cy={el.height / 2}
@@ -679,7 +954,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                     className="anchor-port"
                     onMouseDown={(e) => startConnectorFromPort(e, el.id)}
                   />
-                  {/* Bottom port */}
                   <circle
                     cx={el.width / 2}
                     cy={el.height}
@@ -687,7 +961,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                     className="anchor-port"
                     onMouseDown={(e) => startConnectorFromPort(e, el.id)}
                   />
-                  {/* Left port */}
                   <circle
                     cx={0}
                     cy={el.height / 2}

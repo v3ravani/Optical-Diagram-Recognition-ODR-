@@ -64,12 +64,13 @@
 ---
 
 ### Tests & Verification
-- **Backend Tests**: 12/12 passing via `python -m pytest backend/tests/ -v`.
+- **Backend Tests**: 14/14 passing via `python -m pytest backend/tests/ -v`.
 - **Frontend Build**: `tsc -b && vite build` completed with 0 errors.
+- **Chart Recognition & Export**: Validated Pie Chart and Bar Chart extraction, data binding, and Mermaid/JSON exporters in `test_chart_recognition.py`.
 - **Hand-Drawn & Lined Paper Flowchart**: Verified on hand-drawn troubleshooting diagram on notebook paper (`samples/hand_drawn_lamp.png`).
 - **Container Suppression**: Verified container elimination preventing outer frames from swallowing inner diagram text.
-- **Editor Drag & Drop Interaction**: Verified via browser subagent recording (`verify_editor_drag_and_drop`) confirming nodes release cleanly and stay in place upon mouseup.
-- **Adaptive OCR & Smart Routing**: Multi-scale upscaling for small crops and 4-way anchor connection ports with grid snapping.
+- **Editor Drag & Drop Interaction**: Verified via browser subagent recording (`verify_editor_drag_and_drop`).
+- **Interactive Chart & Arrow Editing**: Verified in browser recording (`verify_chart_and_arrow_editing`) for live SVG Pie/Bar graph rendering, slice data table, and arrow property controls.
 
 ---
 
@@ -80,4 +81,6 @@
 - `6b81fd6`: `feat: add end-to-end sample test suite, runner, and documentation`
 - `b258aea`: `chore: ignore runtime data directory`
 - `39c5db1`: `fix: hand-drawn flowchart recognition and container suppression fix`
-- Current: `fix: editor drag-and-drop stickiness, smart orthogonal routing, and adaptive OCR scaling`
+- `5d19db2`: `fix: editor drag-and-drop stickiness, smart orthogonal routing, and adaptive OCR scaling`
+- Current: `feat: accurate pie chart and bar graph detection, interactive chart editor, and enhanced arrow controls`
+

@@ -93,36 +93,79 @@ class RegionDetector:
     def _infer_diagram_type(cls, crop: np.ndarray) -> Tuple[DiagramFamily, str]:
         """
         Infers whether a region looks like a Flowchart vs Bar Chart vs Pie Chart.
-        Defaults to Flowchart unless strong evidence of coordinate axes or circular pie sectors exists.
+        Accurately detects printed and hand-drawn diagrams using contour geometry,
+        circularity, baseline alignment, and coordinate axes.
         """
+        import math
         from backend.pipeline.preprocessor import ImagePreprocessor
-        # Suppress notebook lines first to prevent ruled lines from masquerading as axes
+        
+        # Suppress notebook lines first to prevent ruled lines from confusing detectors
         cleaned = ImagePreprocessor.suppress_notebook_lines(crop)
         gray = cv2.cvtColor(cleaned, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 50, 150)
-        
-        # Check for circular shapes (pie chart indicator - requires strict param2=80)
         h, w = crop.shape[:2]
         min_dim = min(h, w)
+
+        # 1. Check for Pie Charts (Dominant circular contour OR verified Hough Circle)
+        thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 15, 6)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        closed = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        for cnt in contours:
+            c_area = cv2.contourArea(cnt)
+            if c_area < (w * h) * 0.14:
+                continue
+            bx, by, bw, bh = cv2.boundingRect(cnt)
+            aspect = float(bw) / max(1, bh)
+            if 0.78 <= aspect <= 1.28 and bw >= min_dim * 0.35:
+                peri = cv2.arcLength(cnt, True)
+                circularity = 4 * math.pi * (c_area / ((peri * peri) + 1e-5))
+                hull = cv2.convexHull(cnt)
+                solidity = c_area / (cv2.contourArea(hull) + 1e-5)
+                # Pie chart is a large dominant circular disc with high solidity
+                if circularity > 0.62 and solidity > 0.85:
+                    return DiagramFamily.CHART, "pie_chart"
+
+        edges = cv2.Canny(gray, 50, 150)
         circles = cv2.HoughCircles(
             gray,
             cv2.HOUGH_GRADIENT,
             dp=1.2,
             minDist=min_dim // 2,
-            param1=120,
-            param2=80,
-            minRadius=int(min_dim * 0.25),
-            maxRadius=int(min_dim * 0.48)
+            param1=100,
+            param2=35,
+            minRadius=int(min_dim * 0.20),
+            maxRadius=int(min_dim * 0.52)
         )
-        if circles is not None and len(circles[0]) >= 1:
-            return DiagramFamily.CHART, "pie_chart"
+        if circles is not None:
+            for c in circles[0]:
+                cx, cy, r = int(c[0]), int(c[1]), int(c[2])
+                # Circle must be in the central region of the diagram crop
+                if 0.25 * w < cx < 0.75 * w and 0.25 * h < cy < 0.75 * h:
+                    mask = np.zeros(gray.shape, dtype=np.uint8)
+                    cv2.circle(mask, (cx, cy), r, 255, 10)
+                    support = np.sum((edges > 0) & (mask > 0)) / (2 * math.pi * r)
+                    # Real pie circle has high continuous edge support along its perimeter
+                    if support >= 0.85:
+                        return DiagramFamily.CHART, "pie_chart"
 
-        # Check for genuine coordinate axes:
-        # A bar chart requires an L-shaped axis system where:
-        # 1. The horizontal X-axis sits in the bottom third of the crop (y > 0.65 * h)
-        # 2. The vertical Y-axis sits in the left third of the crop (x < 0.35 * w)
-        # 3. Both axes originate/intersect near the bottom-left corner
-        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=90, minLineLength=int(min_dim * 0.35), maxLineGap=10)
+        # 2. Check for Bar Charts via Aligned Vertical Bars sharing a baseline
+        bar_rects: List[Tuple[int, int, int, int]] = []
+        for cnt in contours:
+            bx, by, bw, bh = cv2.boundingRect(cnt)
+            if bh >= 25 and 8 <= bw <= w * 0.35 and bh > bw * 1.1:
+                bar_rects.append((bx, by, bw, bh))
+
+        if len(bar_rects) >= 3:
+            bottoms = [by + bh for _, by, _, bh in bar_rects]
+            bottoms.sort()
+            for i in range(len(bottoms) - 2):
+                if bottoms[i + 2] - bottoms[i] < max(25, int(h * 0.08)):
+                    return DiagramFamily.CHART, "bar_chart"
+
+        # 3. Check for Coordinate Axes (L-shape in lower-left quadrant)
+        edges = cv2.Canny(gray, 50, 150)
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=85, minLineLength=int(min_dim * 0.30), maxLineGap=10)
         h_axes: List[Tuple[int, int, int, int]] = []
         v_axes: List[Tuple[int, int, int, int]] = []
 
@@ -135,14 +178,11 @@ class RegionDetector:
                 mid_y = (y1 + y2) / 2.0
                 mid_x = (x1 + x2) / 2.0
 
-                # Horizontal axis in lower half of image
-                if dy < 8 and dx > w * 0.35 and mid_y > h * 0.60:
+                if dy < 8 and dx > w * 0.30 and mid_y > h * 0.55:
                     h_axes.append((x1, y1, x2, y2))
-                # Vertical axis in left half of image
-                elif dx < 8 and dy > h * 0.35 and mid_x < w * 0.40:
+                elif dx < 8 and dy > h * 0.30 and mid_x < w * 0.45:
                     v_axes.append((x1, y1, x2, y2))
 
-        # Check if any horizontal axis and vertical axis intersect near bottom-left
         if h_axes and v_axes:
             for hx1, hy1, hx2, hy2 in h_axes:
                 h_left_x = min(hx1, hx2)
@@ -150,11 +190,10 @@ class RegionDetector:
                 for vx1, vy1, vx2, vy2 in v_axes:
                     v_bot_y = max(vy1, vy2)
                     v_x = (vx1 + vx2) / 2.0
-                    # Distance between horizontal start and vertical bottom must be small
-                    if abs(h_left_x - v_x) < w * 0.18 and abs(h_y - v_bot_y) < h * 0.18:
+                    if abs(h_left_x - v_x) < w * 0.20 and abs(h_y - v_bot_y) < h * 0.20:
                         return DiagramFamily.CHART, "bar_chart"
 
-        # Default standard is flowchart
+        # Default standard is Flowchart
         return DiagramFamily.FLOWCHART, "standard_flowchart"
 
     @classmethod
