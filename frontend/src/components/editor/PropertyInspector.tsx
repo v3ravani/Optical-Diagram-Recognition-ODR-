@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ArrowRightLeft,
+  ArrowRight,
   Plus,
   BarChart3,
   PieChart as PieIcon
@@ -199,6 +200,82 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
             <label className="field-label">Node ID</label>
             <input type="text" className="field-input" value={selectedElement.id} disabled style={{ background: 'var(--bg-subtle)' }} />
           </div>
+
+          {/* Quick Manual Arrow Creation from Selected Node */}
+          <div className="inspector-field" style={{ marginTop: '14px', borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+            <label className="field-label" style={{ display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 600 }}>
+              <ArrowRight size={14} style={{ color: 'var(--accent-primary)' }} />
+              <span>Connect Arrow to Another Node</span>
+            </label>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+              <select
+                id="target-node-select"
+                className="field-input"
+                defaultValue=""
+              >
+                <option value="" disabled>Choose destination node...</option>
+                {diagram.elements
+                  .filter((el) => el.id !== selectedElement.id)
+                  .map((el) => (
+                    <option key={el.id} value={el.id}>
+                      {el.label || el.id} ({el.type})
+                    </option>
+                  ))}
+              </select>
+
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <select
+                  id="target-arrow-type"
+                  className="field-input"
+                  style={{ flex: 1, fontSize: '11px' }}
+                  defaultValue="directed"
+                >
+                  <option value="directed">Directed Arrow (→)</option>
+                  <option value="undirected">Plain Line (—)</option>
+                  <option value="bidirectional">Bidirectional (↔)</option>
+                </select>
+
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => {
+                    const selectEl = document.getElementById('target-node-select') as HTMLSelectElement;
+                    const typeEl = document.getElementById('target-arrow-type') as HTMLSelectElement;
+                    if (!selectEl || !selectEl.value) {
+                      alert('Please select a destination node first.');
+                      return;
+                    }
+                    const dir = (typeEl?.value as ConnectorDirection) || 'directed';
+                    const newConn: DiagramConnector = {
+                      id: `conn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+                      source_id: selectedElement.id,
+                      target_id: selectEl.value,
+                      source_handle: 'auto',
+                      target_handle: 'auto',
+                      label: '',
+                      direction: dir,
+                      routing: 'orthogonal',
+                      waypoints: [],
+                      style: {
+                        stroke: '#2b3a42',
+                        stroke_width: 2.0,
+                        arrow_head: dir === 'undirected' ? 'none' : 'classic',
+                        is_dashed: false
+                      },
+                      confidence: 1.0,
+                      uncertainty_status: 'likely_correct',
+                      provenance: { user_created: true }
+                    };
+                    onUpdateConnector(newConn);
+                    selectEl.value = '';
+                  }}
+                  style={{ padding: '5px 12px', fontSize: '12px', whiteSpace: 'nowrap' }}
+                >
+                  + Add Arrow
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </aside>
     );
@@ -241,17 +318,27 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
           </div>
 
           <div className="inspector-field">
-            <label className="field-label">Direction</label>
+            <label className="field-label">Direction & Arrowhead</label>
             <div style={{ display: 'flex', gap: '6px' }}>
               <select
                 className="field-input"
                 style={{ flex: 1 }}
                 value={selectedConnector.direction}
-                onChange={(e) => onUpdateConnector({ ...selectedConnector, direction: e.target.value as ConnectorDirection })}
+                onChange={(e) => {
+                  const dir = e.target.value as ConnectorDirection;
+                  onUpdateConnector({
+                    ...selectedConnector,
+                    direction: dir,
+                    style: {
+                      ...selectedConnector.style,
+                      arrow_head: dir === 'undirected' ? 'none' : 'classic'
+                    }
+                  });
+                }}
               >
-                <option value="directed">Directed (→)</option>
+                <option value="directed">Directed Arrow (→)</option>
+                <option value="undirected">Plain Line (—)</option>
                 <option value="bidirectional">Bidirectional (↔)</option>
-                <option value="undirected">Undirected (—)</option>
               </select>
               <button
                 type="button"
@@ -273,8 +360,9 @@ export const PropertyInspector: React.FC<PropertyInspectorProps> = ({
                 value={selectedConnector.routing}
                 onChange={(e) => onUpdateConnector({ ...selectedConnector, routing: e.target.value as ConnectorStyle })}
               >
-                <option value="orthogonal">Orthogonal</option>
-                <option value="straight">Straight</option>
+                <option value="orthogonal">Orthogonal (⨽)</option>
+                <option value="straight">Straight (/)</option>
+                <option value="curved">Curved (~)</option>
               </select>
             </div>
             <div className="inspector-field">

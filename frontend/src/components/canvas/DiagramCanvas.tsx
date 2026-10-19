@@ -4,8 +4,21 @@ import {
   DiagramElement,
   DiagramConnector,
   ElementType,
-  Point
+  Point,
+  ConnectorDirection,
+  ConnectorStyle
 } from '../../types/diagram';
+import {
+  Copy,
+  Plus,
+  Trash2,
+  ArrowRight,
+  Minus,
+  ArrowLeftRight,
+  Palette,
+  X,
+  Link2
+} from 'lucide-react';
 
 interface DiagramCanvasProps {
   diagram: CanonicalDiagram;
@@ -59,8 +72,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const [resizeHandle, setResizeHandle] = useState<'nw' | 'ne' | 'se' | 'sw' | null>(null);
   const [resizeInitial, setResizeInitial] = useState({ x: 0, y: 0, w: 0, h: 0, mouseX: 0, mouseY: 0 });
 
-  // Connector drawing
+  // Manual Connector Creation (Click-to-Click & Drag-to-Connect)
   const [connectorStartNodeId, setConnectorStartNodeId] = useState<string | null>(null);
+  const [connectorStartPort, setConnectorStartPort] = useState<string>('auto');
   const [tempConnectorEnd, setTempConnectorEnd] = useState<{ x: number; y: number } | null>(null);
 
   // Inline node editing
@@ -84,16 +98,14 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     [pan, zoom]
   );
 
-  // Global mouseup / pointerup listener ensures dragging ALWAYS stops cleanly
+  // Global pointer release for node dragging and resizing
   useEffect(() => {
     const handleGlobalRelease = () => {
-      if (draggingNodeId || resizingNodeId || isPanning || connectorStartNodeId) {
+      if (draggingNodeId || resizingNodeId || isPanning) {
         setIsPanning(false);
         setDraggingNodeId(null);
         setResizingNodeId(null);
         setResizeHandle(null);
-        setConnectorStartNodeId(null);
-        setTempConnectorEnd(null);
         setHasMovedDuringDrag(false);
       }
     };
@@ -104,13 +116,20 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       window.removeEventListener('mouseup', handleGlobalRelease);
       window.removeEventListener('pointerup', handleGlobalRelease);
     };
-  }, [draggingNodeId, resizingNodeId, isPanning, connectorStartNodeId]);
+  }, [draggingNodeId, resizingNodeId, isPanning]);
 
   // Handle Canvas Mouse Down
   const handleMouseDown = (e: React.MouseEvent) => {
     if (activeTool === 'pan' || e.button === 1 || (e as any).spaceKey) {
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      return;
+    }
+
+    // If connector drawing is active, clicking empty canvas cancels it
+    if (connectorStartNodeId) {
+      setConnectorStartNodeId(null);
+      setTempConnectorEnd(null);
       return;
     }
 
@@ -134,6 +153,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     }
 
     const mousePos = screenToCanvas(e.clientX, e.clientY);
+
+    // Connector drawing preview tracks cursor smoothly
+    if (connectorStartNodeId) {
+      setTempConnectorEnd(mousePos);
+    }
 
     // Node movement
     if (draggingNodeId) {
@@ -192,11 +216,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       onChange({ ...diagram, elements: updatedElements }, false);
       return;
     }
-
-    // Connector drawing preview
-    if (connectorStartNodeId) {
-      setTempConnectorEnd(mousePos);
-    }
   };
 
   // Handle Mouse Up on Container
@@ -208,19 +227,26 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     setDraggingNodeId(null);
     setResizingNodeId(null);
     setResizeHandle(null);
-    setConnectorStartNodeId(null);
-    setTempConnectorEnd(null);
     setHasMovedDuringDrag(false);
   };
 
   // Node Drag Start
   const startNodeDrag = (e: React.MouseEvent, node: DiagramElement) => {
     e.stopPropagation();
+
+    // If connector tool is actively selecting target
+    if (connectorStartNodeId) {
+      completeConnectorConnection(node.id, 'auto');
+      return;
+    }
+
     onSelectElement(node.id);
     onSelectConnector(null);
 
     if (activeTool === 'connector') {
       setConnectorStartNodeId(node.id);
+      setConnectorStartPort('auto');
+      setTempConnectorEnd(screenToCanvas(e.clientX, e.clientY));
       return;
     }
 
@@ -233,41 +259,106 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     });
   };
 
-  // Node Drag Finish / Connector link complete
+  // Node Click / Release
   const handleNodeMouseUp = (e: React.MouseEvent, targetNode: DiagramElement) => {
     e.stopPropagation();
 
     if (connectorStartNodeId && connectorStartNodeId !== targetNode.id) {
-      const newConn: DiagramConnector = {
-        id: `conn_${Date.now().toString(36)}`,
-        source_id: connectorStartNodeId,
-        target_id: targetNode.id,
-        source_handle: 'auto',
-        target_handle: 'auto',
-        label: '',
-        direction: 'directed',
-        routing: 'orthogonal',
-        waypoints: [],
-        style: { stroke: '#2b3a42', stroke_width: 2, arrow_head: 'classic', is_dashed: false },
-        confidence: 1.0,
-        uncertainty_status: 'likely_correct',
-        provenance: { user_created: true }
-      };
-
-      onChange({
-        ...diagram,
-        connectors: [...diagram.connectors, newConn]
-      }, true);
-    } else if (draggingNodeId && hasMovedDuringDrag) {
-      onChange(diagram, true);
+      completeConnectorConnection(targetNode.id, 'auto');
+      return;
     }
 
+    if (draggingNodeId && hasMovedDuringDrag) {
+      onChange(diagram, true);
+    }
     setDraggingNodeId(null);
-    setResizingNodeId(null);
-    setResizeHandle(null);
+    setHasMovedDuringDrag(false);
+  };
+
+  // Complete a new connector
+  const completeConnectorConnection = (targetId: string, targetPort: string = 'auto') => {
+    if (!connectorStartNodeId || connectorStartNodeId === targetId) {
+      setConnectorStartNodeId(null);
+      setTempConnectorEnd(null);
+      return;
+    }
+
+    const newConn: DiagramConnector = {
+      id: `conn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      source_id: connectorStartNodeId,
+      target_id: targetId,
+      source_handle: connectorStartPort || 'auto',
+      target_handle: targetPort || 'auto',
+      label: '',
+      direction: 'directed',
+      routing: 'orthogonal',
+      waypoints: [],
+      style: {
+        stroke: '#2b3a42',
+        stroke_width: 2.0,
+        arrow_head: 'classic',
+        is_dashed: false
+      },
+      confidence: 1.0,
+      uncertainty_status: 'likely_correct',
+      provenance: { user_created: true }
+    };
+
+    onChange({
+      ...diagram,
+      connectors: [...diagram.connectors, newConn]
+    }, true);
+
+    onSelectConnector(newConn.id);
+    onSelectElement(null);
     setConnectorStartNodeId(null);
     setTempConnectorEnd(null);
-    setHasMovedDuringDrag(false);
+  };
+
+  // Start connector from explicit anchor port
+  const startConnectorFromPort = (e: React.MouseEvent, nodeId: string, portName: string = 'auto') => {
+    e.stopPropagation();
+    setConnectorStartNodeId(nodeId);
+    setConnectorStartPort(portName);
+    const mousePos = screenToCanvas(e.clientX, e.clientY);
+    setTempConnectorEnd(mousePos);
+  };
+
+  // Complete connector when clicking or releasing on target anchor port
+  const handlePortMouseUp = (e: React.MouseEvent, targetNodeId: string, portName: string) => {
+    e.stopPropagation();
+    if (connectorStartNodeId && connectorStartNodeId !== targetNodeId) {
+      completeConnectorConnection(targetNodeId, portName);
+    }
+  };
+
+  // Duplicate selected node
+  const handleDuplicateNode = (node: DiagramElement) => {
+    const copyNode: DiagramElement = {
+      ...node,
+      id: `node_${Date.now().toString(36)}`,
+      x: node.x + 30,
+      y: node.y + 30,
+      label: `${node.label} (Copy)`,
+      confidence: 1.0
+    };
+    onChange({
+      ...diagram,
+      elements: [...diagram.elements, copyNode]
+    }, true);
+    onSelectElement(copyNode.id);
+  };
+
+  // Delete selected element
+  const handleDeleteSelected = (nodeId: string) => {
+    onChange({
+      ...diagram,
+      elements: diagram.elements.filter((el) => el.id !== nodeId),
+      connectors: diagram.connectors.filter(
+        (c) => c.source_id !== nodeId && c.target_id !== nodeId
+      )
+    }, true);
+    onSelectElement(null);
   };
 
   // Start Resizing Handle
@@ -319,14 +410,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     }
   };
 
-  // Start connector from anchor port
-  const startConnectorFromPort = (e: React.MouseEvent, nodeId: string) => {
-    e.stopPropagation();
-    setConnectorStartNodeId(nodeId);
-    const mousePos = screenToCanvas(e.clientX, e.clientY);
-    setTempConnectorEnd(mousePos);
-  };
-
   const elementMap = new Map(diagram.elements.map((el) => [el.id, el]));
 
   // Calculate smart anchor connection coordinates
@@ -339,7 +422,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     const dx = tgtCx - srcCx;
     const dy = tgtCy - srcCy;
 
-    if (Math.abs(dx) > Math.abs(dy) * 1.2) {
+    if (Math.abs(dx) > Math.abs(dy) * 1.1) {
       if (dx > 0) {
         return { sx: src.x + src.width, sy: srcCy, tx: tgt.x, ty: tgtCy, orientation: 'horizontal' };
       } else {
@@ -399,19 +482,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
       return (
         <g className="chart-group">
-          {/* Chart Title */}
-          <text
-            x={cx}
-            y={80}
-            textAnchor="middle"
-            fill="#0f172a"
-            fontSize="22"
-            fontWeight="600"
-          >
+          <text x={cx} y={80} textAnchor="middle" fill="#0f172a" fontSize="22" fontWeight="600">
             {cd.title || 'Pie Chart'}
           </text>
-
-          {/* Slices */}
           {slices.map((s, idx) => (
             <g key={idx} style={{ cursor: 'pointer' }}>
               <path
@@ -434,8 +507,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               </text>
             </g>
           ))}
-
-          {/* Legend */}
           <g transform={`translate(${cx + R + 90}, ${cy - 120})`}>
             {slices.map((s, idx) => (
               <g key={idx} transform={`translate(0, ${idx * 28})`}>
@@ -457,91 +528,30 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       const plotWidth = 620;
       const plotHeight = 360;
       const maxVal = Math.max(...values, 1) * 1.15;
-
       const n = Math.max(1, categories.length);
       const barW = Math.min(80, Math.max(28, (plotWidth - 40) / n - 20));
       const gap = (plotWidth - barW * n) / (n + 1);
-
-      // Y-axis ticks
       const ticks = [0, 0.25, 0.5, 0.75, 1.0];
 
       return (
         <g className="chart-group">
-          {/* Title */}
-          <text
-            x={originX + plotWidth / 2}
-            y={80}
-            textAnchor="middle"
-            fill="#0f172a"
-            fontSize="22"
-            fontWeight="600"
-          >
+          <text x={originX + plotWidth / 2} y={80} textAnchor="middle" fill="#0f172a" fontSize="22" fontWeight="600">
             {cd.title || 'Bar Chart'}
           </text>
-
-          {/* Horizontal Grid Lines & Y Ticks */}
           {ticks.map((t, idx) => {
             const gy = originY - t * plotHeight;
             const tickVal = Math.round(t * maxVal);
             return (
               <g key={idx}>
-                <line
-                  x1={originX}
-                  y1={gy}
-                  x2={originX + plotWidth}
-                  y2={gy}
-                  stroke="#e2e8f0"
-                  strokeWidth="1"
-                  strokeDasharray="4 4"
-                />
-                <text
-                  x={originX - 12}
-                  y={gy + 4}
-                  textAnchor="end"
-                  fill="#64748b"
-                  fontSize="11"
-                  fontWeight="500"
-                >
+                <line x1={originX} y1={gy} x2={originX + plotWidth} y2={gy} stroke="#e2e8f0" strokeDasharray="3 3" />
+                <text x={originX - 12} y={gy + 4} textAnchor="end" fill="#64748b" fontSize="11" fontWeight="500">
                   {tickVal}
                 </text>
               </g>
             );
           })}
-
-          {/* Axes */}
-          <line
-            x1={originX}
-            y1={originY}
-            x2={originX + plotWidth}
-            y2={originY}
-            stroke="#475569"
-            strokeWidth="2"
-          />
-          <line
-            x1={originX}
-            y1={originY}
-            x2={originX}
-            y2={originY - plotHeight}
-            stroke="#475569"
-            strokeWidth="2"
-          />
-
-          {/* Y Axis Label */}
-          {cd.y_axis_label && (
-            <text
-              x={originX - 45}
-              y={originY - plotHeight / 2}
-              textAnchor="middle"
-              fill="#475569"
-              fontSize="12"
-              fontWeight="600"
-              transform={`rotate(-90, ${originX - 45}, ${originY - plotHeight / 2})`}
-            >
-              {cd.y_axis_label}
-            </text>
-          )}
-
-          {/* Bars */}
+          <line x1={originX} y1={originY} x2={originX + plotWidth} y2={originY} stroke="#475569" strokeWidth="2" />
+          <line x1={originX} y1={originY} x2={originX} y2={originY - plotHeight} stroke="#475569" strokeWidth="2" />
           {categories.map((cat, i) => {
             const val = values[i] ?? 0;
             const barH = (Math.max(0, val) / maxVal) * plotHeight;
@@ -551,58 +561,22 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
             return (
               <g key={i}>
-                <rect
-                  x={bx}
-                  y={by}
-                  width={barW}
-                  height={barH}
-                  rx="4"
-                  fill={color}
-                  style={{ transition: 'all 0.2s ease', cursor: 'pointer' }}
-                />
-                {/* Value on top of bar */}
-                <text
-                  x={bx + barW / 2}
-                  y={by - 8}
-                  textAnchor="middle"
-                  fill="#1e293b"
-                  fontSize="12"
-                  fontWeight="600"
-                >
+                <rect x={bx} y={by} width={barW} height={barH} rx="4" fill={color} />
+                <text x={bx + barW / 2} y={by - 8} textAnchor="middle" fill="#1e293b" fontSize="12" fontWeight="600">
                   {val}
                 </text>
-                {/* Category label below X-axis */}
-                <text
-                  x={bx + barW / 2}
-                  y={originY + 20}
-                  textAnchor="middle"
-                  fill="#334155"
-                  fontSize="12"
-                  fontWeight="500"
-                >
+                <text x={bx + barW / 2} y={originY + 20} textAnchor="middle" fill="#334155" fontSize="12" fontWeight="500">
                   {cat}
                 </text>
               </g>
             );
           })}
-
-          {/* X Axis Label */}
-          {cd.x_axis_label && (
-            <text
-              x={originX + plotWidth / 2}
-              y={originY + 48}
-              textAnchor="middle"
-              fill="#475569"
-              fontSize="12"
-              fontWeight="600"
-            >
-              {cd.x_axis_label}
-            </text>
-          )}
         </g>
       );
     }
   };
+
+  const selectedElement = elementMap.get(selectedElementId || '');
 
   return (
     <div
@@ -611,8 +585,56 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      style={{ userSelect: 'none' }}
+      style={{ userSelect: 'none', position: 'relative', overflow: 'hidden' }}
     >
+      {/* Active Connecting Indicator Banner */}
+      {connectorStartNodeId && (
+        <div
+          style={{
+            position: 'absolute',
+            top: '16px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: 'rgba(15, 118, 110, 0.92)',
+            backdropFilter: 'blur(8px)',
+            color: 'white',
+            padding: '6px 14px',
+            borderRadius: '20px',
+            fontSize: '12px',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            zIndex: 100,
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)'
+          }}
+        >
+          <Link2 size={15} />
+          <span>Click any target node or handle to connect arrow</span>
+          <button
+            onClick={() => {
+              setConnectorStartNodeId(null);
+              setTempConnectorEnd(null);
+            }}
+            style={{
+              background: 'rgba(255,255,255,0.25)',
+              border: 'none',
+              color: 'white',
+              borderRadius: '50%',
+              width: '18px',
+              height: '18px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              marginLeft: '4px'
+            }}
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       <svg
         className="canvas-svg"
         style={{
@@ -621,6 +643,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         }}
       >
         <defs>
+          {/* Classic Forward Arrowhead */}
           <marker
             id="arrowhead"
             markerWidth="10"
@@ -631,6 +654,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           >
             <polygon points="0 0, 10 3.5, 0 7" fill="#2b3a42" />
           </marker>
+
+          {/* Selected Forward Arrowhead */}
           <marker
             id="arrowhead-selected"
             markerWidth="10"
@@ -641,12 +666,36 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           >
             <polygon points="0 0, 10 3.5, 0 7" fill="#0f766e" />
           </marker>
+
+          {/* Bidirectional Backward Arrowhead */}
+          <marker
+            id="arrowhead-start"
+            markerWidth="10"
+            markerHeight="7"
+            refX="1"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon points="10 0, 0 3.5, 10 7" fill="#2b3a42" />
+          </marker>
+
+          {/* Selected Bidirectional Backward Arrowhead */}
+          <marker
+            id="arrowhead-start-selected"
+            markerWidth="10"
+            markerHeight="7"
+            refX="1"
+            refY="3.5"
+            orient="auto"
+          >
+            <polygon points="10 0, 0 3.5, 10 7" fill="#0f766e" />
+          </marker>
         </defs>
 
         {/* 1. Render Chart if Diagram is a Data Chart */}
         {diagram.chart_data && renderChart()}
 
-        {/* 2. Render Connectors (if Flowchart) */}
+        {/* 2. Render Connectors */}
         {diagram.connectors.map((conn) => {
           const src = elementMap.get(conn.source_id);
           const tgt = elementMap.get(conn.target_id);
@@ -661,7 +710,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
           if (conn.routing === 'straight') {
             pathD = `M ${sx} ${sy} L ${tx} ${ty}`;
+          } else if (conn.routing === 'curved') {
+            const midX = (sx + tx) / 2;
+            pathD = `M ${sx} ${sy} C ${midX} ${sy}, ${midX} ${ty}, ${tx} ${ty}`;
           } else {
+            // Orthogonal
             if (orientation === 'horizontal') {
               const midX = (sx + tx) / 2;
               pathD = `M ${sx} ${sy} L ${midX} ${sy} L ${midX} ${ty} L ${tx} ${ty}`;
@@ -675,6 +728,18 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             }
           }
 
+          // Undirected Plain Line: no arrow markers!
+          const isUndirected = conn.direction === 'undirected' || conn.style?.arrow_head === 'none';
+          const isBidirectional = conn.direction === 'bidirectional';
+
+          const markerEnd = isUndirected
+            ? undefined
+            : isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)';
+
+          const markerStart = isBidirectional
+            ? isSelected ? 'url(#arrowhead-start-selected)' : 'url(#arrowhead-start)'
+            : undefined;
+
           return (
             <g
               key={conn.id}
@@ -685,7 +750,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               }}
               style={{ cursor: 'pointer' }}
             >
-              {/* Invisible wider hit-target stroke */}
+              {/* Wide invisible stroke for easy clicking */}
               <path
                 d={pathD}
                 fill="none"
@@ -696,9 +761,10 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 d={pathD}
                 className={`connector-line ${isSelected ? 'selected' : ''}`}
                 stroke={isSelected ? '#0f766e' : conn.style.stroke}
-                strokeWidth={isSelected ? 3 : conn.style.stroke_width}
+                strokeWidth={isSelected ? 3 : (conn.style.stroke_width || 2)}
                 strokeDasharray={conn.style.is_dashed ? '5 4' : 'none'}
-                markerEnd={isSelected ? 'url(#arrowhead-selected)' : 'url(#arrowhead)'}
+                markerEnd={markerEnd}
+                markerStart={markerStart}
               />
 
               {/* Edge Label */}
@@ -746,7 +812,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           );
         })}
 
-        {/* Temporary connector preview while drawing */}
+        {/* Temporary dynamic connector line preview while drawing */}
         {connectorStartNodeId && tempConnectorEnd && (
           <line
             x1={(elementMap.get(connectorStartNodeId)?.x ?? 0) + (elementMap.get(connectorStartNodeId)?.width ?? 0) / 2}
@@ -778,7 +844,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               onMouseLeave={() => setHoveredNodeId(null)}
               onDoubleClick={() => startEditingText(el)}
               style={{
-                cursor: isDragging ? 'grabbing' : activeTool === 'connector' ? 'crosshair' : 'grab'
+                cursor: isDragging ? 'grabbing' : connectorStartNodeId ? 'crosshair' : 'grab'
               }}
             >
               {/* Highlight / Outline glow if focused from issues list */}
@@ -797,7 +863,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               )}
 
               {/* Render Shape Geometry */}
-              {el.type === 'decision' || el.type === 'diamond' ? (
+              {el.type === 'decision' || el.type === 'diamond' || el.type === 'relationship' ? (
                 <polygon
                   points={`${el.width / 2},0 ${el.width},${el.height / 2} ${el.width / 2},${el.height} 0,${el.height / 2}`}
                   fill={el.style.fill}
@@ -815,12 +881,24 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   stroke={isSelected ? '#0f766e' : el.style.stroke}
                   strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
                 />
-              ) : el.type === 'circle' ? (
+              ) : el.type === 'circle' || el.type === 'attribute' || el.type === 'key_attribute' ? (
                 <ellipse
                   cx={el.width / 2}
                   cy={el.height / 2}
                   rx={el.width / 2}
                   ry={el.height / 2}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  strokeDasharray={el.type === 'key_attribute' ? 'none' : 'none'}
+                />
+              ) : el.type === 'database' || el.type === 'data_store' ? (
+                <rect
+                  x={0}
+                  y={0}
+                  width={el.width}
+                  height={el.height}
+                  rx="8"
                   fill={el.style.fill}
                   stroke={isSelected ? '#0f766e' : el.style.stroke}
                   strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
@@ -892,7 +970,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 </text>
               )}
 
-              {/* Selection Box & Resize Handles */}
+              {/* Selection Box & Resize Corners */}
               {isSelected && (
                 <>
                   <rect
@@ -937,43 +1015,89 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 </>
               )}
 
-              {/* Anchor connection ports (appear on hover, selection, or connector tool) */}
-              {(isSelected || isHovered || activeTool === 'connector') && (
+              {/* 4 Interactive Connection Ports (Top, Right, Bottom, Left) */}
+              {(isSelected || isHovered || connectorStartNodeId) && (
                 <>
-                  <circle
-                    cx={el.width / 2}
-                    cy={0}
-                    r={4}
-                    className="anchor-port"
-                    onMouseDown={(e) => startConnectorFromPort(e, el.id)}
-                  />
-                  <circle
-                    cx={el.width}
-                    cy={el.height / 2}
-                    r={4}
-                    className="anchor-port"
-                    onMouseDown={(e) => startConnectorFromPort(e, el.id)}
-                  />
-                  <circle
-                    cx={el.width / 2}
-                    cy={el.height}
-                    r={4}
-                    className="anchor-port"
-                    onMouseDown={(e) => startConnectorFromPort(e, el.id)}
-                  />
-                  <circle
-                    cx={0}
-                    cy={el.height / 2}
-                    r={4}
-                    className="anchor-port"
-                    onMouseDown={(e) => startConnectorFromPort(e, el.id)}
-                  />
+                  {[
+                    { name: 'top', cx: el.width / 2, cy: 0 },
+                    { name: 'right', cx: el.width, cy: el.height / 2 },
+                    { name: 'bottom', cx: el.width / 2, cy: el.height },
+                    { name: 'left', cx: 0, cy: el.height / 2 }
+                  ].map((port) => (
+                    <g key={port.name}>
+                      {/* Outer pulse & hit zone */}
+                      <circle
+                        cx={port.cx}
+                        cy={port.cy}
+                        r={8}
+                        fill="transparent"
+                        stroke="#0f766e"
+                        strokeWidth="1.5"
+                        style={{ cursor: 'crosshair' }}
+                        onMouseDown={(e) => startConnectorFromPort(e, el.id, port.name)}
+                        onMouseUp={(e) => handlePortMouseUp(e, el.id, port.name)}
+                      />
+                      {/* Center dot */}
+                      <circle
+                        cx={port.cx}
+                        cy={port.cy}
+                        r={3.5}
+                        fill="#0f766e"
+                        style={{ cursor: 'crosshair', pointerEvents: 'none' }}
+                      />
+                    </g>
+                  ))}
                 </>
               )}
             </g>
           );
         })}
       </svg>
+
+      {/* Floating Action Bar above selected node */}
+      {selectedElement && !connectorStartNodeId && (
+        <div
+          style={{
+            position: 'absolute',
+            left: `${selectedElement.x * zoom + pan.x}px`,
+            top: `${(selectedElement.y - 38) * zoom + pan.y}px`,
+            background: 'var(--bg-surface)',
+            border: '1px solid var(--border-medium)',
+            borderRadius: '6px',
+            boxShadow: 'var(--shadow-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '2px',
+            padding: '2px 4px',
+            zIndex: 50
+          }}
+        >
+          <button
+            className="btn-icon"
+            onClick={(e) => startConnectorFromPort(e, selectedElement.id, 'right')}
+            title="Add Arrow from this node"
+            style={{ color: 'var(--accent-primary)', padding: '4px' }}
+          >
+            <ArrowRight size={14} />
+          </button>
+          <button
+            className="btn-icon"
+            onClick={() => handleDuplicateNode(selectedElement)}
+            title="Duplicate Node"
+            style={{ padding: '4px' }}
+          >
+            <Copy size={13} />
+          </button>
+          <button
+            className="btn-icon"
+            onClick={() => handleDeleteSelected(selectedElement.id)}
+            title="Delete Node (Del)"
+            style={{ color: 'var(--color-error)', padding: '4px' }}
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

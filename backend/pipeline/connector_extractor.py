@@ -360,18 +360,24 @@ class ConnectorExtractor:
                 # Edge leaves decision node towards source_el
                 return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
 
-        # 3. Arrowhead density check (arrowhead triangle has 2-3x density of straight thin line)
-        if d2 > d1 * 1.15:
-            # Arrow is at p2, pointing into target_el
+        # 3. Arrowhead density check (arrowhead triangle has 2.5x-4x density of straight thin line)
+        min_arrow_density = 36.0
+        if d2 > d1 * 1.30 and d2 >= min_arrow_density:
+            # Arrowhead is at p2, pointing into target_el
             return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
-        elif d1 > d2 * 1.15:
-            # Arrow is at p1, pointing into source_el (so direction is reversed)
+        elif d1 > d2 * 1.30 and d1 >= min_arrow_density:
+            # Arrowhead is at p1, pointing into source_el (direction reversed)
             return ConnectorDirection.DIRECTED, target_el.id, source_el.id, h2, h1
 
-        # 4. Handle loops/feedback paths vs forward flow:
-        # If p2 connects to the top or left handle of target_el while target_el is higher than source_el,
-        # it is often an upward feedback loop! Do NOT arbitrarily reverse it.
-        # Preserve the traced orientation (p1 -> p2) unless strong geometric evidence indicates otherwise.
+        # 4. If neither endpoint shows an arrowhead and neither shape enforces a role,
+        # preserve faithfully as an UNDIRECTED line (line without arrow direction)
+        if d1 < min_arrow_density and d2 < min_arrow_density:
+            return ConnectorDirection.UNDIRECTED, source_el.id, target_el.id, h1, h2
+
+        # 5. Fallback for balanced density with no visible arrowhead
+        if abs(d1 - d2) < max(d1, d2, 1.0) * 0.20:
+            return ConnectorDirection.UNDIRECTED, source_el.id, target_el.id, h1, h2
+
         return ConnectorDirection.DIRECTED, source_el.id, target_el.id, h1, h2
 
     @classmethod
@@ -412,22 +418,29 @@ class ConnectorExtractor:
             th = e.get("target_handle", "auto")
             p1 = e.get("p1", (0, 0))
             p2 = e.get("p2", (0, 0))
+            is_undirected = e.get("direction") == ConnectorDirection.UNDIRECTED
 
             # Check if this edge is an exact duplicate of an already retained edge
             is_dup = False
             for existing in retained:
-                # Same source and target
-                if existing["source_id"] == src and existing["target_id"] == tgt:
-                    # Same attachment handles or endpoints within 25px
-                    ex_p1 = existing.get("p1", (0, 0))
-                    ex_p2 = existing.get("p2", (0, 0))
-                    dist_p1 = math.hypot(p1[0] - ex_p1[0], p1[1] - ex_p1[1])
-                    dist_p2 = math.hypot(p2[0] - ex_p2[0], p2[1] - ex_p2[1])
+                ex_src = existing["source_id"]
+                ex_tgt = existing["target_id"]
+                ex_p1 = existing.get("p1", (0, 0))
+                ex_p2 = existing.get("p2", (0, 0))
+                ex_undirected = existing.get("direction") == ConnectorDirection.UNDIRECTED
 
-                    if dist_p1 < 30.0 and dist_p2 < 30.0:
+                fwd_dist = math.hypot(p1[0] - ex_p1[0], p1[1] - ex_p1[1]) + math.hypot(p2[0] - ex_p2[0], p2[1] - ex_p2[1])
+                rev_dist = math.hypot(p1[0] - ex_p2[0], p1[1] - ex_p2[1]) + math.hypot(p2[0] - ex_p1[0], p2[1] - ex_p1[1])
+
+                # If either edge is undirected and connects the same two nodes, they are the same undirected link
+                if (ex_src == src and ex_tgt == tgt) or (ex_src == tgt and ex_tgt == src):
+                    if is_undirected or ex_undirected:
                         is_dup = True
                         break
-                    if existing.get("source_handle") == sh and existing.get("target_handle") == th:
+
+                # Directed edge duplicate check between same source and target
+                if ex_src == src and ex_tgt == tgt:
+                    if fwd_dist < 60.0 or (existing.get("source_handle") == sh and existing.get("target_handle") == th):
                         is_dup = True
                         break
 
@@ -446,9 +459,24 @@ class ConnectorExtractor:
         Connects disconnected components in standard sequential flowcharts only if
         elements have zero incoming or outgoing connections.
         """
-        connected_sources = {e["source_id"] for e in existing_edges}
-        connected_targets = {e["target_id"] for e in existing_edges}
-        
+        connected_sources = set()
+        connected_targets = set()
+        connected_pairs = set()
+
+        for e in existing_edges:
+            s_id = e["source_id"]
+            t_id = e["target_id"]
+            connected_pairs.add((s_id, t_id))
+            connected_pairs.add((t_id, s_id))
+            if e.get("direction") == ConnectorDirection.UNDIRECTED:
+                connected_sources.add(s_id)
+                connected_sources.add(t_id)
+                connected_targets.add(s_id)
+                connected_targets.add(t_id)
+            else:
+                connected_sources.add(s_id)
+                connected_targets.add(t_id)
+
         sorted_els = sorted(elements, key=lambda el: el.y)
         new_edges = list(existing_edges)
 
@@ -457,6 +485,8 @@ class ConnectorExtractor:
             t_el = sorted_els[i + 1]
 
             if s_el.role == "end":
+                continue
+            if (s_el.id, t_el.id) in connected_pairs:
                 continue
             # If s_el has no outgoing edge and t_el has no incoming edge
             if s_el.id not in connected_sources and t_el.id not in connected_targets:
@@ -523,19 +553,22 @@ class ConnectorExtractor:
                 used_text_indices.add(closest_tb_idx)
                 label = unassigned_text[closest_tb_idx].text
 
+            direction = edge_info.get("direction", ConnectorDirection.DIRECTED)
+            arrow_head = "none" if direction == ConnectorDirection.UNDIRECTED else "classic"
+
             conn = DiagramConnector(
                 source_id=edge_info["source_id"],
                 target_id=edge_info["target_id"],
                 source_handle=edge_info.get("source_handle", "auto"),
                 target_handle=edge_info.get("target_handle", "auto"),
                 label=label,
-                direction=edge_info.get("direction", ConnectorDirection.DIRECTED),
+                direction=direction,
                 routing=ConnectorStyle.ORTHOGONAL,
                 waypoints=[Point(x=float(pt[0]), y=float(pt[1])) for pt in waypoints],
                 style=ConnectorStyleProps(
                     stroke="#2b3a42",
                     stroke_width=2.0,
-                    arrow_head="classic"
+                    arrow_head=arrow_head
                 ),
                 confidence=edge_info.get("confidence", 0.92),
                 uncertainty_status=UncertaintyStatus.LIKELY_CORRECT,

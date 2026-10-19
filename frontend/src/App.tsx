@@ -6,7 +6,9 @@ import {
   DiagramRegion,
   ProjectMetadata,
   ProjectData,
-  ElementType
+  ElementType,
+  ConnectorDirection,
+  ConnectorStyle
 } from './types/diagram';
 import { api } from './services/api';
 
@@ -216,19 +218,44 @@ export function App() {
   // Shape Palette Add Shape
   const handleAddShape = (type: ElementType, label: string) => {
     if (!diagram) return;
+    const isDiamond = type === 'decision' || type === 'relationship' || type === 'diamond';
+    const isOval = type === 'attribute' || type === 'key_attribute' || type === 'circle';
+
+    let fillColor = '#ffffff';
+    let strokeColor = '#2b3a42';
+    if (type === 'key_attribute') {
+      fillColor = '#fef9c3';
+      strokeColor = '#ca8a04';
+    } else if (type === 'attribute') {
+      fillColor = '#f0fdf4';
+      strokeColor = '#16a34a';
+    } else if (type === 'relationship') {
+      fillColor = '#fef2f2';
+      strokeColor = '#dc2626';
+    } else if (type === 'external_entity') {
+      fillColor = '#f1f5f9';
+      strokeColor = '#475569';
+    } else if (type === 'database' || type === 'data_store') {
+      fillColor = '#fef3c7';
+      strokeColor = '#d97706';
+    } else if (type === 'participant') {
+      fillColor = '#e0f2fe';
+      strokeColor = '#0284c7';
+    }
+
     const newElement: DiagramElement = {
       id: `node_${Date.now().toString(36)}`,
       type,
-      role: type === 'terminal' ? 'start' : type === 'decision' ? 'decision' : 'process',
+      role: type === 'terminal' ? 'start' : isDiamond ? 'decision' : 'process',
       label,
       raw_text: label,
       x: 350 - pan.x / zoom,
       y: 250 - pan.y / zoom,
-      width: type === 'decision' ? 140 : 150,
-      height: type === 'decision' ? 80 : 65,
+      width: isDiamond ? 140 : isOval ? 120 : 150,
+      height: isDiamond ? 80 : isOval ? 52 : 65,
       style: {
-        fill: '#ffffff',
-        stroke: '#2b3a42',
+        fill: fillColor,
+        stroke: strokeColor,
         stroke_width: 2,
         text_color: '#1e293b',
         font_size: 14,
@@ -244,8 +271,54 @@ export function App() {
     updateDiagram({
       ...diagram,
       elements: [...diagram.elements, newElement]
-    });
+    }, true);
     setSelectedElementId(newElement.id);
+  };
+
+  // Quick Add Connector / Line from Palette or Toolbar
+  const handleAddQuickConnector = (direction: ConnectorDirection = 'directed', routing: ConnectorStyle = 'orthogonal') => {
+    if (!diagram || diagram.elements.length < 2) {
+      alert('You need at least 2 shapes on the canvas to add an arrow or line.');
+      return;
+    }
+
+    let srcId = selectedElementId;
+    let tgtId = diagram.elements.find((el) => el.id !== srcId)?.id;
+
+    if (!srcId) {
+      srcId = diagram.elements[diagram.elements.length - 2].id;
+      tgtId = diagram.elements[diagram.elements.length - 1].id;
+    }
+
+    if (!tgtId) return;
+
+    const newConn: DiagramConnector = {
+      id: `conn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+      source_id: srcId,
+      target_id: tgtId,
+      source_handle: 'auto',
+      target_handle: 'auto',
+      label: '',
+      direction,
+      routing,
+      waypoints: [],
+      style: {
+        stroke: '#2b3a42',
+        stroke_width: 2.0,
+        arrow_head: direction === 'undirected' ? 'none' : 'classic',
+        is_dashed: false
+      },
+      confidence: 1.0,
+      uncertainty_status: 'likely_correct',
+      provenance: { user_created: true }
+    };
+
+    updateDiagram({
+      ...diagram,
+      connectors: [...diagram.connectors, newConn]
+    }, true);
+    setSelectedConnectorId(newConn.id);
+    setSelectedElementId(null);
   };
 
   // Shape Palette Add Data Chart
@@ -624,7 +697,11 @@ export function App() {
           />
 
           <div className="editor-body">
-            <ShapePalette onAddShape={handleAddShape} onAddChart={handleAddChart} />
+            <ShapePalette
+              onAddShape={handleAddShape}
+              onAddChart={handleAddChart}
+              onAddQuickConnector={handleAddQuickConnector}
+            />
 
             <DiagramCanvas
               diagram={diagram}

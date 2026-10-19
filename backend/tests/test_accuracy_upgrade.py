@@ -308,3 +308,55 @@ def test_erd_reconstruction():
     mmd, mmd_valid, _ = MermaidExporter.export(diagram)
     assert mmd_valid
     assert len(mmd) > 20
+
+
+def test_flowchart_undirected_lines_preserved():
+    """
+    Tests that a diagram with plain lines and no arrowheads keeps lines (undirected),
+    faithfully preserving non-directional links without silently inventing arrows.
+    """
+    img = np.ones((500, 600, 3), dtype=np.uint8) * 255
+
+    # Process A
+    cv2.rectangle(img, (80, 200), (220, 270), (40, 40, 40), 2)
+    cv2.putText(img, "Module Alpha", (90, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+
+    # Process B
+    cv2.rectangle(img, (380, 200), (520, 270), (40, 40, 40), 2)
+    cv2.putText(img, "Module Beta", (390, 240), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 2)
+
+    # Simple plain line connecting them - NO ARROWHEAD
+    cv2.line(img, (220, 235), (380, 235), (40, 40, 40), 2)
+
+    region = DiagramRegion(
+        file_name="undirected_flow.png",
+        page_number=1,
+        x=0,
+        y=0,
+        width=600,
+        height=500,
+        suggested_type=DiagramFamily.FLOWCHART,
+        suggested_subtype="flowchart",
+        label="Undirected Link Flowchart"
+    )
+
+    reconstructor = DiagramReconstructor()
+    diagram = reconstructor.reconstruct(img, region, project_id="undirected_proj")
+
+    assert len(diagram.elements) >= 2
+    assert len(diagram.connectors) >= 1
+
+    conn = diagram.connectors[0]
+    # Direction MUST be undirected because no arrowheads exist
+    assert conn.direction == ConnectorDirection.UNDIRECTED, f"Expected undirected line, got {conn.direction}"
+
+    # Mermaid export must use --- and NOT -->
+    mmd, mmd_valid, _ = MermaidExporter.export(diagram)
+    assert mmd_valid
+    assert "---" in mmd
+    assert "-->" not in mmd
+
+    # PlantUML export must use -- and NOT -->
+    puml, puml_valid, _ = PlantUMLExporter.export(diagram)
+    assert puml_valid
+    assert "--" in puml
