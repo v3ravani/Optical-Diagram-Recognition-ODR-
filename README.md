@@ -2,7 +2,6 @@
 
 *Recognize, reconstruct, edit, and export flowcharts, technical diagrams, and charts from images.*
 
-[![CI](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/actions/workflows/ci.yml/badge.svg)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org/)
