@@ -24,6 +24,7 @@ from backend.core.models import (
 from backend.pipeline.ocr_engine import OCREngine, OCRTextBlock
 from backend.pipeline.shape_detector import ShapeDetector
 from backend.pipeline.connector_extractor import ConnectorExtractor
+from backend.pipeline.preprocessor import ImagePreprocessor
 from backend.core.validator import DiagramValidator
 
 
@@ -44,14 +45,17 @@ class DiagramReconstructor:
         """
         h, w = crop_image.shape[:2]
         
+        # Clean notebook lines and shadows for robust OCR and line detection
+        cleaned_image = ImagePreprocessor.suppress_notebook_lines(crop_image)
+
         # 1. OCR text extraction
-        ocr_blocks = self.ocr_engine.extract_text(crop_image)
+        ocr_blocks = self.ocr_engine.extract_text(cleaned_image)
 
         # 2. Reconstruct based on diagram family
         if region.suggested_type == DiagramFamily.CHART:
-            diagram = self._reconstruct_chart(crop_image, ocr_blocks, region, project_id)
+            diagram = self._reconstruct_chart(cleaned_image, ocr_blocks, region, project_id)
         else:
-            diagram = self._reconstruct_flowchart(crop_image, ocr_blocks, region, project_id)
+            diagram = self._reconstruct_flowchart(cleaned_image, ocr_blocks, region, project_id)
 
         # 3. Run structural & export validation
         diagram = DiagramValidator.validate(diagram)

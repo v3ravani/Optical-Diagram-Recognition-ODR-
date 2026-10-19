@@ -11,6 +11,7 @@ import numpy as np
 from backend.core.models import (
     DiagramElement,
     DiagramConnector,
+    ElementType,
     ConnectorDirection,
     ConnectorStyle,
     ConnectorStyleProps,
@@ -126,7 +127,7 @@ class ConnectorExtractor:
                     })
 
         # Deduplicate candidate edges (merge edges with same source and target)
-        deduped = cls._deduplicate_edges(candidate_edges)
+        deduped = cls._deduplicate_edges(candidate_edges, elements)
 
         # Fallback: If elements are vertically/horizontally aligned but lines were faint,
         # infer sequential flowchart connections based on topological flow
@@ -293,15 +294,29 @@ class ConnectorExtractor:
         return []
 
     @classmethod
-    def _deduplicate_edges(cls, edges: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        seen = set()
-        unique = []
+    def _deduplicate_edges(
+        cls,
+        edges: List[Dict[str, Any]],
+        elements: List[DiagramElement]
+    ) -> List[Dict[str, Any]]:
+        el_map = {el.id: el for el in elements}
+        pair_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
         for e in edges:
-            key = (e["source_id"], e["target_id"])
-            if key not in seen:
-                seen.add(key)
-                unique.append(e)
-        return unique
+            src_id = e["source_id"]
+            tgt_id = e["target_id"]
+            src_el = el_map.get(src_id)
+
+            canonical_pair = tuple(sorted([src_id, tgt_id]))
+
+            if canonical_pair not in pair_map:
+                pair_map[canonical_pair] = e
+            else:
+                # If new edge originates from a decision node, prefer it
+                if src_el and src_el.type == ElementType.DECISION:
+                    pair_map[canonical_pair] = e
+
+        return list(pair_map.values())
 
     @classmethod
     def _infer_fallback_connections(

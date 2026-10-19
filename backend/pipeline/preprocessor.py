@@ -48,6 +48,25 @@ class ImagePreprocessor:
         return results
 
     @staticmethod
+    def suppress_notebook_lines(image: np.ndarray) -> np.ndarray:
+        """
+        Suppresses faint blue/cyan or light gray notebook ruling lines to prevent them
+        from interfering with hand-drawn shape contour detection and OCR.
+        """
+        if len(image.shape) < 3:
+            return image
+            
+        b, g, r = cv2.split(image)
+        # Blue/cyan notebook ruling lines: high blue, lower red/green, relatively light
+        b_diff_r = b.astype(int) - r.astype(int)
+        b_diff_g = b.astype(int) - g.astype(int)
+        is_blue_line = (b_diff_r > 12) & (b_diff_g > 6) & (b > 110)
+
+        cleaned = image.copy()
+        cleaned[is_blue_line] = [255, 255, 255]
+        return cleaned
+
+    @staticmethod
     def deskew(image: np.ndarray) -> Tuple[np.ndarray, float]:
         """
         Estimates skew angle using minAreaRect on edge contours and rotates image if angle > 0.5 degrees.

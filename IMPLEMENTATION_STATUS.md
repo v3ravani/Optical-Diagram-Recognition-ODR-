@@ -64,8 +64,10 @@
 ---
 
 ### Tests & Verification
-- **Backend Tests**: 11/11 passing via `python -m pytest backend/tests/ -v`.
-- **Frontend Build**: `tsc -b && vite build` completed in 1.93s with 0 errors.
+- **Backend Tests**: 12/12 passing via `python -m pytest backend/tests/ -v`.
+- **Frontend Build**: `tsc -b && vite build` completed with 0 errors.
+- **Hand-Drawn & Lined Paper Flowchart**: Verified on hand-drawn troubleshooting diagram on notebook paper (`samples/hand_drawn_lamp.png`).
+- **Container Suppression**: Verified container elimination preventing outer frames from swallowing inner diagram text.
 
 ---
 
@@ -73,3 +75,5 @@
 - `83885d3`: `chore: initial repository configuration`
 - `cbe78bf`: `feat: implement backend pipeline, canonical models, and exporters`
 - `2264cda`: `feat: implement interactive canvas editor, review workspace, and export modals`
+- `6b81fd6`: `feat: add end-to-end sample test suite, runner, and documentation`
+- `b258aea`: `chore: ignore runtime data directory`
