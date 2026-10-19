@@ -1,3 +1,5 @@
+<div align="center">
+
 # Optical Diagram Recognition (ODR)
 
 *Recognize, reconstruct, edit, and export flowcharts, technical diagrams, and charts from images.*
@@ -8,6 +10,8 @@
 [![GitHub Stars](https://img.shields.io/github/stars/v3ravani/Optical-Diagram-Recognition-ODR-?style=flat)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/v3ravani/Optical-Diagram-Recognition-ODR-?style=flat)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/network/members)
 [![Open Issues](https://img.shields.io/github/issues/v3ravani/Optical-Diagram-Recognition-ODR-)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/issues)
+
+</div>
 
 ---
 
