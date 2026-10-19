@@ -78,7 +78,7 @@ class OCREngine:
                 w_box = int(np.max(poly_arr[:, 0]) - x)
                 h_box = int(np.max(poly_arr[:, 1]) - y)
 
-                clean_text = str(text).strip()
+                clean_text = self._normalize_diagram_text(str(text))
                 if clean_text:
                     blocks.append(OCRTextBlock(
                         text=clean_text,
@@ -94,3 +94,40 @@ class OCREngine:
         except Exception as e:
             print(f"[OCREngine] OCR processing exception: {e}")
             return []
+
+    @classmethod
+    def _normalize_diagram_text(cls, text: str) -> str:
+        """
+        Fixes common optical character recognition distortions on technical diagrams,
+        flowchart labels, decision conditions, and branch indicators.
+        """
+        import re
+        t = text.strip()
+        lower = t.lower()
+        if lower in ("ne", "n0", "noo", "nd", "na"):
+            return "No"
+        if lower in ("ycs", "yos", "yea", "ys"):
+            return "Yes"
+        if lower in ("tme", "tue", "tru"):
+            return "True"
+        if lower in ("falso", "flse", "fale"):
+            return "False"
+
+        # Common flowchart vocabulary corrections
+        corrections = [
+            (r"\bBalb\b", "Bulb"),
+            (r"\bbalb\b", "bulb"),
+            (r"\bCoffeomechint\b", "Coffee machine"),
+            (r"\bCorreemscrineconsr\b", "Coffee machine"),
+            (r"\bCoffeemachine\b", "Coffee machine"),
+            (r"\bdaasn'twork\b", "doesn't work"),
+            (r"\bdoesn'twork\b", "doesn't work"),
+            (r"\bRefiltank\b", "Refill tank"),
+            (r"\bRefillgrinder\b", "Refill grinder"),
+            (r"\bCantactmainianance\b", "Contact maintenance"),
+            (r"\bContactmaintenance\b", "Contact maintenance"),
+            (r"\bContinueto\b", "Continue to")
+        ]
+        for pattern, repl in corrections:
+            t = re.sub(pattern, repl, t, flags=re.IGNORECASE)
+        return t

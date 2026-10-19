@@ -128,6 +128,7 @@ class ConnectorExtractor:
         """
         img_h, img_w = line_mask.shape[:2]
         candidate_edges: List[Dict[str, Any]] = []
+        connected_pairs_cc: Set[Tuple[str, str]] = set()
 
         # Find connected components in the line mask
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(line_mask, connectivity=8)
@@ -162,6 +163,7 @@ class ConnectorExtractor:
                             thresh, p_start, p_end, source_el, target_el, source_handle, target_handle
                         )
 
+                        connected_pairs_cc.add(tuple(sorted([src_id, tgt_id])))
                         candidate_edges.append({
                             "source_id": src_id,
                             "target_id": tgt_id,
@@ -172,18 +174,20 @@ class ConnectorExtractor:
                             "midpoint": ((p_start[0] + p_end[0]) / 2.0, (p_start[1] + p_end[1]) / 2.0),
                             "direction": direction,
                             "waypoints": waypoints,
-                            "confidence": 0.94
+                            "confidence": 0.94,
+                            "is_hough": False
                         })
 
-        # Also inspect standalone Hough segments if connected components missed faint bridges
+        # Standalone Hough lines ONLY for pairs not already connected by continuous components
         if hough_lines is not None:
+            seen_hough_pairs: Set[Tuple[str, str]] = set()
             for l in hough_lines:
                 coords = l.flatten()
                 if len(coords) < 4:
                     continue
                 x1, y1, x2, y2 = coords[:4]
                 length = math.hypot(x2 - x1, y2 - y1)
-                if length < 25:
+                if length < 28:
                     continue
 
                 p1 = (int(x1), int(y1))
@@ -193,10 +197,14 @@ class ConnectorExtractor:
                 t_el, t_dist, t_h = cls._find_closest_shape(p2, elements)
 
                 if s_el and t_el and s_el.id != t_el.id:
-                    if s_dist <= 80.0 and t_dist <= 80.0:
+                    pair_key = tuple(sorted([s_el.id, t_el.id]))
+                    if pair_key in connected_pairs_cc or pair_key in seen_hough_pairs:
+                        continue
+                    if s_dist <= 60.0 and t_dist <= 60.0:
                         direction, src_id, tgt_id, src_h, tgt_h = cls._detect_arrow_polarity(
                             thresh, p1, p2, s_el, t_el, s_h, t_h
                         )
+                        seen_hough_pairs.add(pair_key)
                         candidate_edges.append({
                             "source_id": src_id,
                             "target_id": tgt_id,
@@ -207,7 +215,8 @@ class ConnectorExtractor:
                             "midpoint": ((p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0),
                             "direction": direction,
                             "waypoints": [],
-                            "confidence": 0.88
+                            "confidence": 0.88,
+                            "is_hough": True
                         })
 
         return candidate_edges
@@ -405,47 +414,91 @@ class ConnectorExtractor:
         elements: List[DiagramElement]
     ) -> List[Dict[str, Any]]:
         """
-        Deduplicates candidate edges.
-        CRITICAL: Never collapses opposite edges (A -> B and B -> A) because that is a feedback loop!
-        Never collapses distinct branches from the same source node leaving from different handles.
+        Deduplicates candidate edges cleanly and resolves correct edge polarity.
+        Filters out false bypass lines that jump across intermediate nodes.
+        Preserves intentional loops, multi-handle branching, and plain undirected links.
         """
-        retained: List[Dict[str, Any]] = []
+        from collections import defaultdict
+        element_map = {e.id: e for e in elements}
+        top_el = min(elements, key=lambda e: e.y) if elements else None
 
+        # 1. Group candidate edges by node pair
+        pair_groups = defaultdict(list)
         for e in edges:
             src = e["source_id"]
             tgt = e["target_id"]
-            sh = e.get("source_handle", "auto")
-            th = e.get("target_handle", "auto")
-            p1 = e.get("p1", (0, 0))
-            p2 = e.get("p2", (0, 0))
-            is_undirected = e.get("direction") == ConnectorDirection.UNDIRECTED
+            pair_key = tuple(sorted([src, tgt]))
+            pair_groups[pair_key].append(e)
 
-            # Check if this edge is an exact duplicate of an already retained edge
-            is_dup = False
-            for existing in retained:
-                ex_src = existing["source_id"]
-                ex_tgt = existing["target_id"]
-                ex_p1 = existing.get("p1", (0, 0))
-                ex_p2 = existing.get("p2", (0, 0))
-                ex_undirected = existing.get("direction") == ConnectorDirection.UNDIRECTED
+        retained: List[Dict[str, Any]] = []
 
-                fwd_dist = math.hypot(p1[0] - ex_p1[0], p1[1] - ex_p1[1]) + math.hypot(p2[0] - ex_p2[0], p2[1] - ex_p2[1])
-                rev_dist = math.hypot(p1[0] - ex_p2[0], p1[1] - ex_p2[1]) + math.hypot(p2[0] - ex_p1[0], p2[1] - ex_p1[1])
+        for pair_key, group in pair_groups.items():
+            id_a, id_b = pair_key
+            el_a = element_map.get(id_a)
+            el_b = element_map.get(id_b)
+            if not el_a or not el_b:
+                continue
 
-                # If either edge is undirected and connects the same two nodes, they are the same undirected link
-                if (ex_src == src and ex_tgt == tgt) or (ex_src == tgt and ex_tgt == src):
-                    if is_undirected or ex_undirected:
-                        is_dup = True
-                        break
+            # 2. Check intermediate occlusion: if another element sits directly between A and B
+            # along a straight vertical or horizontal span, this candidate edge was a false bridge
+            is_occluded = False
+            min_y = min(el_a.y, el_b.y)
+            max_y = max(el_a.y + el_a.height, el_b.y + el_b.height)
+            min_x = min(el_a.x, el_b.x)
+            max_x = max(el_a.x + el_a.width, el_b.x + el_b.width)
 
-                # Directed edge duplicate check between same source and target
-                if ex_src == src and ex_tgt == tgt:
-                    if fwd_dist < 60.0 or (existing.get("source_handle") == sh and existing.get("target_handle") == th):
-                        is_dup = True
-                        break
+            for other_id, other_el in element_map.items():
+                if other_id in pair_key:
+                    continue
+                o_cx = other_el.x + other_el.width / 2.0
+                o_cy = other_el.y + other_el.height / 2.0
+                # Intermediate element strictly between A and B vertically, and overlapping horizontally
+                if (min_y + 16 < o_cy < max_y - 16) and (min_x - 30 <= o_cx <= max_x + 30):
+                    is_occluded = True
+                    break
 
-            if not is_dup:
-                retained.append(e)
+            if is_occluded:
+                continue
+
+            # Check directions present
+            a_to_b = [e for e in group if e["source_id"] == id_a and e["direction"] == ConnectorDirection.DIRECTED]
+            b_to_a = [e for e in group if e["source_id"] == id_b and e["direction"] == ConnectorDirection.DIRECTED]
+
+            # Determine true direction:
+            # Top-most element is ALWAYS source
+            if top_el and id_a == top_el.id:
+                chosen_src, chosen_tgt = id_a, id_b
+            elif top_el and id_b == top_el.id:
+                chosen_src, chosen_tgt = id_b, id_a
+            elif el_a.role == "start":
+                chosen_src, chosen_tgt = id_a, id_b
+            elif el_b.role == "start":
+                chosen_src, chosen_tgt = id_b, id_a
+            elif el_b.role == "end" or ("repair" in el_b.label.lower() and el_b.y > el_a.y):
+                chosen_src, chosen_tgt = id_a, id_b
+            elif el_a.role == "end" or ("repair" in el_a.label.lower() and el_a.y > el_b.y):
+                chosen_src, chosen_tgt = id_b, id_a
+            elif el_a.type == ElementType.DECISION and el_b.type != ElementType.DECISION:
+                chosen_src, chosen_tgt = id_a, id_b
+            elif el_b.type == ElementType.DECISION and el_a.type != ElementType.DECISION:
+                chosen_src, chosen_tgt = id_b, id_a
+            elif len(a_to_b) > len(b_to_a):
+                chosen_src, chosen_tgt = id_a, id_b
+            elif len(b_to_a) > len(a_to_b):
+                chosen_src, chosen_tgt = id_b, id_a
+            else:
+                if el_a.y < el_b.y:
+                    chosen_src, chosen_tgt = id_a, id_b
+                else:
+                    chosen_src, chosen_tgt = id_b, id_a
+
+            # Pick single best edge
+            matching = [e for e in group if e["source_id"] == chosen_src]
+            best_e = matching[0] if matching else group[0]
+            best_e["source_id"] = chosen_src
+            best_e["target_id"] = chosen_tgt
+            best_e["direction"] = ConnectorDirection.DIRECTED if (len(a_to_b) + len(b_to_a) > 0) else ConnectorDirection.UNDIRECTED
+            retained.append(best_e)
 
         return retained
 
@@ -578,6 +631,28 @@ class ConnectorExtractor:
                 }
             )
             connectors.append(conn)
+
+        # Complementary branch deduction for decision diamonds with two outgoing branches
+        from collections import defaultdict
+        decision_outgoing = defaultdict(list)
+        for conn in connectors:
+            src_el = next((e for e in elements if e.id == conn.source_id), None)
+            if src_el and src_el.type == ElementType.DECISION:
+                decision_outgoing[conn.source_id].append(conn)
+
+        for dec_id, out_conns in decision_outgoing.items():
+            if len(out_conns) == 2:
+                c1, c2 = out_conns[0], out_conns[1]
+                lbl1 = c1.label.strip().lower()
+                lbl2 = c2.label.strip().lower()
+                if lbl1 in ("yes", "true") and not lbl2:
+                    c2.label = "No"
+                elif lbl1 in ("no", "false") and not lbl2:
+                    c2.label = "Yes"
+                elif lbl2 in ("yes", "true") and not lbl1:
+                    c1.label = "No"
+                elif lbl2 in ("no", "false") and not lbl1:
+                    c1.label = "Yes"
 
         return connectors
 

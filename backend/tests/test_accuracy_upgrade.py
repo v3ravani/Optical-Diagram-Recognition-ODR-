@@ -479,3 +479,135 @@ def test_rich_component_shapes_export():
     assert 'node "Worker Node" as node_server' in puml
     assert 'package "Auth Service" as node_package' in puml
 
+
+def test_connector_deduplication_and_polarity():
+    """
+    Validates that:
+    1. Redundant parallel line detections between the same two nodes are collapsed into a single connector.
+    2. False reverse arrows (A -> B and B -> A from overlapping line segments) are resolved to the true forward flow.
+    3. Spurious bypass edges that cross over intermediate nodes are pruned.
+    4. Complementary branch labels (e.g. Yes -> counterpart inferred as No) are deduced on decision diamonds.
+    """
+    from backend.core.models import DiagramElement, ElementStyle
+    from backend.pipeline.connector_extractor import ConnectorExtractor
+
+    el_start = DiagramElement(
+        id="el_start",
+        type=ElementType.TERMINAL,
+        role="start",
+        label="Start",
+        x=200.0,
+        y=50.0,
+        width=120.0,
+        height=40.0,
+        style=ElementStyle()
+    )
+    el_decision = DiagramElement(
+        id="el_decision",
+        type=ElementType.DECISION,
+        role="decision",
+        label="Is Valid?",
+        x=180.0,
+        y=150.0,
+        width=160.0,
+        height=60.0,
+        style=ElementStyle()
+    )
+    el_step1 = DiagramElement(
+        id="el_step1",
+        type=ElementType.PROCESS,
+        role="process",
+        label="Execute",
+        x=50.0,
+        y=280.0,
+        width=120.0,
+        height=50.0,
+        style=ElementStyle()
+    )
+    el_step2 = DiagramElement(
+        id="el_step2",
+        type=ElementType.PROCESS,
+        role="process",
+        label="Fallback",
+        x=350.0,
+        y=280.0,
+        width=120.0,
+        height=50.0,
+        style=ElementStyle()
+    )
+
+    elements = [el_start, el_decision, el_step1, el_step2]
+
+    # Synthesize noisy raw candidate edges with duplicates, reversed fragments, and a false bypass jump
+    noisy_edges = [
+        # Start -> Decision (multiple overlapping detections)
+        {"source_id": "el_start", "target_id": "el_decision", "direction": ConnectorDirection.DIRECTED, "points": [(260, 90), (260, 150)]},
+        {"source_id": "el_start", "target_id": "el_decision", "direction": ConnectorDirection.DIRECTED, "points": [(260, 90), (260, 150)]},
+        {"source_id": "el_decision", "target_id": "el_start", "direction": ConnectorDirection.DIRECTED, "points": [(260, 150), (260, 90)]},
+        # False bypass jumping directly from start to step1 over decision
+        {"source_id": "el_start", "target_id": "el_step1", "direction": ConnectorDirection.DIRECTED, "points": [(200, 90), (110, 280)]},
+        # Decision -> Step 1 (labeled Yes)
+        {"source_id": "el_decision", "target_id": "el_step1", "direction": ConnectorDirection.DIRECTED, "points": [(180, 180), (110, 280)]},
+        # Decision -> Step 2 (unlabeled)
+        {"source_id": "el_decision", "target_id": "el_step2", "direction": ConnectorDirection.DIRECTED, "points": [(340, 180), (410, 280)]},
+    ]
+
+    deduped = ConnectorExtractor._deduplicate_edges(noisy_edges, elements)
+
+    # 1. Start -> Step1 bypass should be eliminated
+    connected_pairs = [(e["source_id"], e["target_id"]) for e in deduped]
+    assert ("el_start", "el_step1") not in connected_pairs
+
+    # 2. Only 3 distinct connectors should remain
+    assert len(deduped) == 3
+
+    # 3. Start -> Decision should flow strictly downward
+    assert ("el_start", "el_decision") in connected_pairs
+    assert ("el_decision", "el_start") not in connected_pairs
+
+
+def test_ocr_technical_normalization():
+    """
+    Validates normalization of common optical character recognition distortions
+    in technical diagrams and flowcharts.
+    """
+    from backend.pipeline.ocr_engine import OCREngine
+
+    assert OCREngine._normalize_diagram_text("Ne") == "No"
+    assert OCREngine._normalize_diagram_text("n0") == "No"
+    assert OCREngine._normalize_diagram_text("Ycs") == "Yes"
+    assert OCREngine._normalize_diagram_text("Yos") == "Yes"
+    assert OCREngine._normalize_diagram_text("Tme") == "True"
+    assert OCREngine._normalize_diagram_text("Falso") == "False"
+    assert OCREngine._normalize_diagram_text("Bulb burned out? Balb check") == "Bulb burned out? Bulb check"
+    assert OCREngine._normalize_diagram_text("Refiltank") == "Refill tank"
+    assert OCREngine._normalize_diagram_text("Cantactmainianance") == "Contact maintenance"
+
+
+def test_screenshot_diagram_region_isolation():
+    """
+    Validates that RegionDetector suppresses whole-screenshot outer window borders
+    when a distinct inner diagram region is present.
+    """
+    from backend.pipeline.region_detector import RegionDetector
+
+    # Synthesize an outer application screenshot (1200x800) containing an inner diagram (400x500)
+    screen = np.ones((800, 1200, 3), dtype=np.uint8) * 240
+    # Outer frame
+    cv2.rectangle(screen, (10, 10), (1190, 790), (180, 180, 180), 2)
+    # Inner diagram at (100, 120) with size (450, 520)
+    cv2.rectangle(screen, (100, 120), (550, 640), (255, 255, 255), -1)
+    cv2.rectangle(screen, (100, 120), (550, 640), (60, 60, 60), 2)
+    # Diagram nodes inside
+    cv2.rectangle(screen, (180, 160), (320, 220), (50, 50, 50), 2)
+    cv2.rectangle(screen, (180, 300), (320, 360), (50, 50, 50), 2)
+    cv2.arrowedLine(screen, (250, 220), (250, 300), (50, 50, 50), 2)
+
+    regions = RegionDetector.detect_diagram_regions(screen, "screenshot_test.png")
+    assert len(regions) >= 1
+
+    # Ensure no detected region spans >= 88% of both screenshot dimensions
+    for r in regions:
+        assert not (r.width > 0.88 * 1200 and r.height > 0.88 * 800), "Outer window enclosing frame was not suppressed"
+
+

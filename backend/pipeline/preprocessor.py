@@ -57,10 +57,10 @@ class ImagePreprocessor:
             return image
             
         b, g, r = cv2.split(image)
-        # Blue/cyan notebook ruling lines: high blue, lower red/green, relatively light
+        # Faint blue/cyan notebook ruling lines: high blue, lower red/green, must be light pastel background
         b_diff_r = b.astype(int) - r.astype(int)
         b_diff_g = b.astype(int) - g.astype(int)
-        is_blue_line = (b_diff_r > 12) & (b_diff_g > 6) & (b > 110)
+        is_blue_line = (b_diff_r > 20) & (b_diff_g > 10) & (b > 185) & (r > 150) & (g > 160)
 
         cleaned = image.copy()
         cleaned[is_blue_line] = [255, 255, 255]
