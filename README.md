@@ -1,15 +1,39 @@
 # Optical Diagram Recognition (ODR)
 
-Optical Diagram Recognition (ODR) is an open-source, local-first system designed to recognize, reconstruct, edit, and export technical diagrams, flowcharts, and charts from scanned documents, photographs, digital exports, and application screenshots.
+*Recognize, reconstruct, edit, and export flowcharts, technical diagrams, and charts from images.*
 
-Technical diagrams contain complex spatial relationships, multi-directional flow paths, decision branches, and domain-specific glyphs. Unlike traditional Optical Character Recognition (OCR), which processes linear textual paragraphs, diagram recognition requires solving multiple interrelated computer vision problems: geometric contour isolation, text-to-node association, connector stroke tracing, arrow polarity determination, and topological validation.
+[![CI](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/actions/workflows/ci.yml/badge.svg)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Node.js 18+](https://img.shields.io/badge/node.js-18+-green.svg)](https://nodejs.org/)
+[![GitHub Stars](https://img.shields.io/github/stars/v3ravani/Optical-Diagram-Recognition-ODR-?style=flat)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/stargazers)
+[![GitHub Forks](https://img.shields.io/github/forks/v3ravani/Optical-Diagram-Recognition-ODR-?style=flat)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/network/members)
+[![Open Issues](https://img.shields.io/github/issues/v3ravani/Optical-Diagram-Recognition-ODR-)](https://github.com/v3ravani/Optical-Diagram-Recognition-ODR-/issues)
 
-ODR operates completely offline on consumer hardware without external cloud APIs, proprietary models, or telemetry. It couples a modular computer vision recognition engine with an interactive browser-based visual editor and multi-format exporters (Mermaid, PlantUML, JSON, and PNG).
+---
+
+## Overview
+
+Optical Diagram Recognition (ODR) is an open-source software system that transforms static diagram images into structured, editable, and machine-readable models. It parses visual inputs from scanned documents, whiteboard photos, digital technical diagrams, and desktop screenshots, extracting the underlying semantic entities, connections, and data series.
+
+In engineering, architecture, and business documentation, critical systems diagrams frequently remain trapped in raster image formats, PDFs, or slides. Modifying, maintaining, or converting these static visuals into documentation code normally requires manual redrawing from scratch. ODR bridges this gap by automatically recovering diagram structure directly from raw pixel data.
+
+Recognizing technical diagrams requires significantly more than standard optical character recognition. Traditional OCR systems assume linear, unidirectional text organized into horizontal lines and paragraphs. Technical diagrams, in contrast, are non-linear two-dimensional visual graphs. Text labels perform varied roles as node headers, nested step instructions, or conditional decision branch tags (`Yes`/`No`/`True`/`False`). Crucially, the meaning of a diagram depends on its spatial and geometric relationships: which shapes represent operations, where connectors begin and terminate, which direction arrowheads point, and how return loops feed back into preceding stages.
+
+ODR addresses these challenges through a modular computer vision and geometric reconstruction engine:
+
+- **Shape and Text Recognition**: Identifies geometric contours (process steps, decision diamonds, terminals, input/output blocks, and database stores), isolates text blocks, and associates each label with its corresponding enclosing node.
+- **Topological Connector Tracing**: Traces connecting lines, evaluates arrow polarity, prunes spurious bypass lines across intermediate steps, deduplicates overlapping stroke fragments, and binds decision branch conditions.
+- **Structural Validation & Verification**: Inspects topological integrity (such as detecting isolated nodes or single-branch decisions) and provides a synchronized review workspace where selecting any diagram node highlights its original crop on the source image.
+- **Visual Editing & Multi-Format Export**: Includes an interactive browser canvas for port connection, manual arrow drawing, and styling, with native export to Mermaid (`.mmd`), PlantUML (`.puml`), canonical JSON (`.json`), high-resolution PNG (`.png`), and complete ZIP distribution archives.
+
+The engine supports flowcharts, sequence diagrams, data flow diagrams (DFD), entity-relationship diagrams (ERD), bar charts, and pie charts.
 
 ---
 
 ## Table of Contents
 
+- [Overview](#overview)
 - [Features](#features)
 - [Supported Diagram Types](#supported-diagram-types)
 - [Demonstrations and Visuals](#demonstrations-and-visuals)
