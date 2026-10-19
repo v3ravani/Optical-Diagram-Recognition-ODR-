@@ -182,8 +182,28 @@ class MermaidExporter:
             return f'{safe_id}(["{label}"])'
         elif el_type == ElementType.IO:
             return f'{safe_id}[/"{label}"/]'
+        elif el_type == ElementType.MANUAL_OPERATION:
+            return f'{safe_id}[/"{label}"\\]'
         elif el_type == ElementType.PREDEFINED_PROCESS:
             return f'{safe_id}[["{label}"]]'
+        elif el_type == ElementType.PREPARATION:
+            return f'{safe_id}{{{{"{label}"}}}}'
+        elif el_type in (ElementType.OFF_PAGE_CONNECTOR, ElementType.DOCUMENT):
+            return f'{safe_id}>"{label}"]'
+        elif el_type == ElementType.FINAL_STATE:
+            return f'{safe_id}(("{label}"))'
+        elif el_type == ElementType.CLOUD:
+            return f'{safe_id}["☁️ {label}"]'
+        elif el_type == ElementType.SERVER:
+            return f'{safe_id}["🖥️ {label}"]'
+        elif el_type == ElementType.QUEUE:
+            return f'{safe_id}["🔀 {label}"]'
+        elif el_type == ElementType.ACTOR:
+            return f'{safe_id}["👤 {label}"]'
+        elif el_type == ElementType.PACKAGE:
+            return f'{safe_id}["📦 {label}"]'
+        elif el_type in (ElementType.DELAY, ElementType.DISPLAY, ElementType.CARD):
+            return f'{safe_id}(["{label}"])'
         else:
             return f'{safe_id}["{label}"]'
 

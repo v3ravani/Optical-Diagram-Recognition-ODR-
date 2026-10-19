@@ -84,7 +84,7 @@ class PlantUMLExporter:
                 
                 if el.type in (ElementType.DECISION, ElementType.RELATIONSHIP):
                     lines.append(f'diamond "{label}" as {safe_id}')
-                elif el.type == ElementType.TERMINAL:
+                elif el.type in (ElementType.TERMINAL, ElementType.FINAL_STATE):
                     lines.append(f'circle "{label}" as {safe_id}')
                 elif el.type in (ElementType.DATABASE, ElementType.DATA_STORE):
                     lines.append(f'database "{label}" as {safe_id}')
@@ -92,6 +92,22 @@ class PlantUMLExporter:
                     lines.append(f'entity "{label}" as {safe_id}')
                 elif el.type in (ElementType.ATTRIBUTE, ElementType.KEY_ATTRIBUTE):
                     lines.append(f'storage "{label}" as {safe_id}')
+                elif el.type == ElementType.PREPARATION:
+                    lines.append(f'hexagon "{label}" as {safe_id}')
+                elif el.type == ElementType.CLOUD:
+                    lines.append(f'cloud "{label}" as {safe_id}')
+                elif el.type == ElementType.QUEUE:
+                    lines.append(f'queue "{label}" as {safe_id}')
+                elif el.type == ElementType.SERVER:
+                    lines.append(f'node "{label}" as {safe_id}')
+                elif el.type == ElementType.ACTOR:
+                    lines.append(f'actor "{label}" as {safe_id}')
+                elif el.type == ElementType.PACKAGE:
+                    lines.append(f'package "{label}" as {safe_id}')
+                elif el.type == ElementType.DOCUMENT:
+                    lines.append(f'file "{label}" as {safe_id}')
+                elif el.type == ElementType.CARD:
+                    lines.append(f'card "{label}" as {safe_id}')
                 else:
                     lines.append(f'rectangle "{label}" as {safe_id}')
 

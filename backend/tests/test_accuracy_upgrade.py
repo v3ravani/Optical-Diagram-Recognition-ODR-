@@ -360,3 +360,122 @@ def test_flowchart_undirected_lines_preserved():
     puml, puml_valid, _ = PlantUMLExporter.export(diagram)
     assert puml_valid
     assert "--" in puml
+
+
+def test_rich_component_shapes_export():
+    """
+    Tests that rich components (Preparation Hexagon, Cloud, Queue, Server,
+    Manual Operation, Card, Package, Delay, Display) serialize accurately.
+    """
+    from backend.core.models import CanonicalDiagram, DiagramElement, DiagramConnector, ElementStyle
+
+    elements = [
+        DiagramElement(
+            id="node_prep",
+            type=ElementType.PREPARATION,
+            label="Init Variables",
+            x=100, y=100, width=150, height=65,
+            style=ElementStyle()
+        ),
+        DiagramElement(
+            id="node_cloud",
+            type=ElementType.CLOUD,
+            label="AWS Gateway",
+            x=300, y=100, width=160, height=85,
+            style=ElementStyle()
+        ),
+        DiagramElement(
+            id="node_queue",
+            type=ElementType.QUEUE,
+            label="Event Kafka",
+            x=500, y=100, width=150, height=55,
+            style=ElementStyle()
+        ),
+        DiagramElement(
+            id="node_server",
+            type=ElementType.SERVER,
+            label="Worker Node",
+            x=700, y=100, width=150, height=70,
+            style=ElementStyle()
+        ),
+        DiagramElement(
+            id="node_manual",
+            type=ElementType.MANUAL_OPERATION,
+            label="Admin Override",
+            x=100, y=300, width=150, height=65,
+            style=ElementStyle()
+        ),
+        DiagramElement(
+            id="node_card",
+            type=ElementType.CARD,
+            label="Latency KPI",
+            x=300, y=300, width=150, height=65,
+            style=ElementStyle()
+        ),
+        DiagramElement(
+            id="node_package",
+            type=ElementType.PACKAGE,
+            label="Auth Service",
+            x=500, y=300, width=150, height=75,
+            style=ElementStyle()
+        ),
+        DiagramElement(
+            id="node_final",
+            type=ElementType.FINAL_STATE,
+            label="Stop",
+            x=700, y=300, width=55, height=55,
+            style=ElementStyle()
+        ),
+    ]
+
+    connectors = [
+        DiagramConnector(
+            id="conn_1",
+            source_id="node_prep",
+            target_id="node_cloud",
+            direction=ConnectorDirection.DIRECTED,
+            label="send"
+        ),
+        DiagramConnector(
+            id="conn_2",
+            source_id="node_cloud",
+            target_id="node_queue",
+            direction=ConnectorDirection.DIRECTED,
+            label="publish"
+        ),
+        DiagramConnector(
+            id="conn_3",
+            source_id="node_queue",
+            target_id="node_server",
+            direction=ConnectorDirection.UNDIRECTED,
+            label="pull"
+        )
+    ]
+
+    diag = CanonicalDiagram(
+        id="diag_rich_components",
+        project_id="test_proj",
+        name="Rich Component Architecture",
+        family=DiagramFamily.FLOWCHART,
+        elements=elements,
+        connectors=connectors
+    )
+
+    mmd, mmd_valid, _ = MermaidExporter.export(diag)
+    assert mmd_valid
+    assert 'node_prep{{"Init Variables"}}' in mmd
+    assert 'node_cloud["☁️ AWS Gateway"]' in mmd
+    assert 'node_queue["🔀 Event Kafka"]' in mmd
+    assert 'node_server["🖥️ Worker Node"]' in mmd
+    assert 'node_final(("Stop"))' in mmd
+    assert 'node_prep -->|send| node_cloud' in mmd
+    assert 'node_queue ---|pull| node_server' in mmd
+
+    puml, puml_valid, _ = PlantUMLExporter.export(diag)
+    assert puml_valid
+    assert 'hexagon "Init Variables" as node_prep' in puml
+    assert 'cloud "AWS Gateway" as node_cloud' in puml
+    assert 'queue "Event Kafka" as node_queue' in puml
+    assert 'node "Worker Node" as node_server' in puml
+    assert 'package "Auth Service" as node_package' in puml
+

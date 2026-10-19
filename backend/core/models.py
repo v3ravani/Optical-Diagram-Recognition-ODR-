@@ -58,6 +58,20 @@ class ElementType(str, Enum):
     RELATIONSHIP = "relationship"
     KEY_ATTRIBUTE = "key_attribute"
 
+    # Flowchart extensions, Architecture & State components
+    PREPARATION = "preparation"
+    MANUAL_OPERATION = "manual_operation"
+    OFF_PAGE_CONNECTOR = "off_page_connector"
+    DELAY = "delay"
+    DISPLAY = "display"
+    MERGE = "merge"
+    CLOUD = "cloud"
+    SERVER = "server"
+    QUEUE = "queue"
+    CARD = "card"
+    PACKAGE = "package"
+    FINAL_STATE = "final_state"
+
 
 class DiagramFamily(str, Enum):
     FLOWCHART = "flowchart"

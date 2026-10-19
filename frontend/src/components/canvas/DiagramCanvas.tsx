@@ -890,19 +890,50 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   fill={el.style.fill}
                   stroke={isSelected ? '#0f766e' : el.style.stroke}
                   strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
-                  strokeDasharray={el.type === 'key_attribute' ? 'none' : 'none'}
                 />
-              ) : el.type === 'database' || el.type === 'data_store' ? (
-                <rect
-                  x={0}
-                  y={0}
-                  width={el.width}
-                  height={el.height}
-                  rx="8"
-                  fill={el.style.fill}
-                  stroke={isSelected ? '#0f766e' : el.style.stroke}
-                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
-                />
+              ) : el.type === 'final_state' ? (
+                <g>
+                  <ellipse
+                    cx={el.width / 2}
+                    cy={el.height / 2}
+                    rx={el.width / 2}
+                    ry={el.height / 2}
+                    fill={el.style.fill}
+                    stroke={isSelected ? '#0f766e' : el.style.stroke}
+                    strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  />
+                  <circle
+                    cx={el.width / 2}
+                    cy={el.height / 2}
+                    r={Math.min(el.width, el.height) * 0.28}
+                    fill={isSelected ? '#0f766e' : el.style.stroke}
+                  />
+                </g>
+              ) : el.type === 'database' ? (
+                <g>
+                  <path
+                    d={`M 0 10 L 0 ${el.height - 10} A ${el.width / 2} 10 0 0 0 ${el.width} ${el.height - 10} L ${el.width} 10 Z`}
+                    fill={el.style.fill}
+                    stroke={isSelected ? '#0f766e' : el.style.stroke}
+                    strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  />
+                  <ellipse
+                    cx={el.width / 2}
+                    cy={10}
+                    rx={el.width / 2}
+                    ry={10}
+                    fill={el.style.fill}
+                    stroke={isSelected ? '#0f766e' : el.style.stroke}
+                    strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  />
+                </g>
+              ) : el.type === 'data_store' ? (
+                <g>
+                  <rect x={0} y={0} width={el.width} height={el.height} fill={el.style.fill} stroke="none" />
+                  <line x1={0} y1={0} x2={el.width} y2={0} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={isSelected ? 2.5 : el.style.stroke_width} />
+                  <line x1={0} y1={el.height} x2={el.width} y2={el.height} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={isSelected ? 2.5 : el.style.stroke_width} />
+                  <line x1={18} y1={0} x2={18} y2={el.height} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1.5} />
+                </g>
               ) : el.type === 'io' ? (
                 <polygon
                   points={`${el.width * 0.15},0 ${el.width},0 ${el.width * 0.85},${el.height} 0,${el.height}`}
@@ -910,6 +941,139 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   stroke={isSelected ? '#0f766e' : el.style.stroke}
                   strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
                 />
+              ) : el.type === 'preparation' ? (
+                <polygon
+                  points={`${el.width * 0.18},0 ${el.width * 0.82},0 ${el.width},${el.height / 2} ${el.width * 0.82},${el.height} ${el.width * 0.18},${el.height} 0,${el.height / 2}`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'manual_operation' ? (
+                <polygon
+                  points={`0,0 ${el.width},0 ${el.width * 0.82},${el.height} ${el.width * 0.18},${el.height}`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'off_page_connector' ? (
+                <polygon
+                  points={`0,0 ${el.width},0 ${el.width},${el.height * 0.65} ${el.width / 2},${el.height} 0,${el.height * 0.65}`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'delay' ? (
+                <path
+                  d={`M 0 0 L ${el.width - el.height / 2} 0 A ${el.height / 2} ${el.height / 2} 0 0 1 ${el.width - el.height / 2} ${el.height} L 0 ${el.height} Z`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'display' ? (
+                <path
+                  d={`M ${el.width * 0.15} 0 L ${el.width * 0.82} 0 Q ${el.width} ${el.height / 2} ${el.width * 0.82} ${el.height} L ${el.width * 0.15} ${el.height} L 0 ${el.height / 2} Z`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'merge' ? (
+                <polygon
+                  points={`0,0 ${el.width},0 ${el.width / 2},${el.height}`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'document' ? (
+                <path
+                  d={`M 0 0 L ${el.width} 0 L ${el.width} ${el.height - 10} Q ${el.width * 0.75} ${el.height + 2} ${el.width * 0.5} ${el.height - 8} T 0 ${el.height - 4} Z`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'predefined' ? (
+                <g>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={el.width}
+                    height={el.height}
+                    rx={4}
+                    fill={el.style.fill}
+                    stroke={isSelected ? '#0f766e' : el.style.stroke}
+                    strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  />
+                  <line x1={12} y1={0} x2={12} y2={el.height} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1.5} />
+                  <line x1={el.width - 12} y1={0} x2={el.width - 12} y2={el.height} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1.5} />
+                </g>
+              ) : el.type === 'cloud' ? (
+                <path
+                  d={`M ${el.width * 0.22} ${el.height * 0.82} C ${el.width * 0.04} ${el.height * 0.82} ${el.width * 0.04} ${el.height * 0.44} ${el.width * 0.20} ${el.height * 0.44} C ${el.width * 0.14} ${el.height * 0.18} ${el.width * 0.40} ${el.height * 0.08} ${el.width * 0.54} ${el.height * 0.24} C ${el.width * 0.70} ${el.height * 0.08} ${el.width * 0.90} ${el.height * 0.18} ${el.width * 0.86} ${el.height * 0.44} C ${el.width * 0.98} ${el.height * 0.44} ${el.width * 0.98} ${el.height * 0.82} ${el.width * 0.80} ${el.height * 0.82} Z`}
+                  fill={el.style.fill}
+                  stroke={isSelected ? '#0f766e' : el.style.stroke}
+                  strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                />
+              ) : el.type === 'server' ? (
+                <g>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={el.width}
+                    height={el.height}
+                    rx={6}
+                    fill={el.style.fill}
+                    stroke={isSelected ? '#0f766e' : el.style.stroke}
+                    strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  />
+                  <line x1={0} y1={el.height * 0.33} x2={el.width} y2={el.height * 0.33} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1} strokeDasharray="3 2" />
+                  <line x1={0} y1={el.height * 0.66} x2={el.width} y2={el.height * 0.66} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1} strokeDasharray="3 2" />
+                  <circle cx={10} cy={el.height * 0.16} r={2.5} fill="#10b981" />
+                  <circle cx={10} cy={el.height * 0.50} r={2.5} fill="#10b981" />
+                  <circle cx={10} cy={el.height * 0.83} r={2.5} fill="#10b981" />
+                </g>
+              ) : el.type === 'queue' ? (
+                <g>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={el.width}
+                    height={el.height}
+                    rx={Math.min(el.height / 2, 16)}
+                    fill={el.style.fill}
+                    stroke={isSelected ? '#0f766e' : el.style.stroke}
+                    strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  />
+                  <line x1={el.width * 0.25} y1={0} x2={el.width * 0.25} y2={el.height} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1.5} />
+                  <line x1={el.width * 0.50} y1={0} x2={el.width * 0.50} y2={el.height} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1.5} />
+                  <line x1={el.width * 0.75} y1={0} x2={el.width * 0.75} y2={el.height} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={1.5} />
+                </g>
+              ) : el.type === 'actor' ? (
+                <g>
+                  <rect x={0} y={0} width={el.width} height={el.height} rx={8} fill={el.style.fill} stroke={isSelected ? '#0f766e' : '#cbd5e1'} strokeWidth={1.5} strokeDasharray={isSelected ? 'none' : '4 3'} />
+                  <circle cx={el.width / 2} cy={16} r={9} fill="none" stroke={el.style.stroke} strokeWidth={2} />
+                  <line x1={el.width / 2} y1={25} x2={el.width / 2} y2={44} stroke={el.style.stroke} strokeWidth={2} />
+                  <line x1={el.width / 2 - 14} y1={32} x2={el.width / 2 + 14} y2={32} stroke={el.style.stroke} strokeWidth={2} />
+                  <line x1={el.width / 2} y1={44} x2={el.width / 2 - 10} y2={el.height - 8} stroke={el.style.stroke} strokeWidth={2} />
+                  <line x1={el.width / 2} y1={44} x2={el.width / 2 + 10} y2={el.height - 8} stroke={el.style.stroke} strokeWidth={2} />
+                </g>
+              ) : el.type === 'package' ? (
+                <g>
+                  <path d="M 0 12 L 0 0 L 36 0 L 44 12 Z" fill={el.style.fill} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={isSelected ? 2.5 : el.style.stroke_width} />
+                  <rect x={0} y={12} width={el.width} height={el.height - 12} rx={4} fill={el.style.fill} stroke={isSelected ? '#0f766e' : el.style.stroke} strokeWidth={isSelected ? 2.5 : el.style.stroke_width} />
+                </g>
+              ) : el.type === 'card' ? (
+                <g>
+                  <rect
+                    x={0}
+                    y={0}
+                    width={el.width}
+                    height={el.height}
+                    rx={6}
+                    fill={el.style.fill}
+                    stroke={isSelected ? '#0f766e' : el.style.stroke}
+                    strokeWidth={isSelected ? 2.5 : el.style.stroke_width}
+                  />
+                  <rect x={0} y={0} width={el.width} height={5} rx={3} fill="#0f766e" />
+                </g>
               ) : (
                 <rect
                   x={0}

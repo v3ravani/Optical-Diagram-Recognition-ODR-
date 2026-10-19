@@ -223,6 +223,9 @@ export function App() {
 
     let fillColor = '#ffffff';
     let strokeColor = '#2b3a42';
+    let width = isDiamond ? 140 : isOval ? 120 : 150;
+    let height = isDiamond ? 80 : isOval ? 52 : 65;
+
     if (type === 'key_attribute') {
       fillColor = '#fef9c3';
       strokeColor = '#ca8a04';
@@ -238,27 +241,96 @@ export function App() {
     } else if (type === 'database' || type === 'data_store') {
       fillColor = '#fef3c7';
       strokeColor = '#d97706';
+      width = 140;
+      height = 70;
     } else if (type === 'participant') {
       fillColor = '#e0f2fe';
       strokeColor = '#0284c7';
+      width = 140;
+      height = 55;
+    } else if (type === 'cloud') {
+      fillColor = '#f0f9ff';
+      strokeColor = '#0284c7';
+      width = 160;
+      height = 85;
+    } else if (type === 'server') {
+      fillColor = '#f8fafc';
+      strokeColor = '#334155';
+      width = 150;
+      height = 70;
+    } else if (type === 'queue') {
+      fillColor = '#faf5ff';
+      strokeColor = '#9333ea';
+      width = 150;
+      height = 55;
+    } else if (type === 'actor') {
+      fillColor = '#f8fafc';
+      strokeColor = '#0f766e';
+      width = 80;
+      height = 90;
+    } else if (type === 'card') {
+      fillColor = '#ffffff';
+      strokeColor = '#cbd5e1';
+      width = 155;
+      height = 65;
+    } else if (type === 'package') {
+      fillColor = '#fffbeb';
+      strokeColor = '#b45309';
+      width = 150;
+      height = 75;
+    } else if (type === 'preparation') {
+      fillColor = '#fdf4ff';
+      strokeColor = '#a21caf';
+      width = 150;
+      height = 65;
+    } else if (type === 'manual_operation') {
+      fillColor = '#f8fafc';
+      strokeColor = '#475569';
+      width = 150;
+      height = 65;
+    } else if (type === 'off_page_connector') {
+      fillColor = '#ecfdf5';
+      strokeColor = '#059669';
+      width = 90;
+      height = 75;
+    } else if (type === 'delay') {
+      fillColor = '#fff7ed';
+      strokeColor = '#ea580c';
+      width = 130;
+      height = 55;
+    } else if (type === 'display') {
+      fillColor = '#f1f5f9';
+      strokeColor = '#0284c7';
+      width = 140;
+      height = 60;
+    } else if (type === 'merge') {
+      fillColor = '#fef2f2';
+      strokeColor = '#dc2626';
+      width = 90;
+      height = 65;
+    } else if (type === 'final_state') {
+      fillColor = '#ffffff';
+      strokeColor = '#0f172a';
+      width = 54;
+      height = 54;
     }
 
     const newElement: DiagramElement = {
-      id: `node_${Date.now().toString(36)}`,
+      id: `node_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 5)}`,
       type,
       role: type === 'terminal' ? 'start' : isDiamond ? 'decision' : 'process',
       label,
       raw_text: label,
       x: 350 - pan.x / zoom,
       y: 250 - pan.y / zoom,
-      width: isDiamond ? 140 : isOval ? 120 : 150,
-      height: isDiamond ? 80 : isOval ? 52 : 65,
+      width,
+      height,
       style: {
         fill: fillColor,
         stroke: strokeColor,
         stroke_width: 2,
         text_color: '#1e293b',
-        font_size: 14,
+        font_size: type === 'final_state' ? 10 : 13,
         text_align: 'center',
         is_dashed: false,
         corner_radius: type === 'terminal' ? 24 : 4
@@ -276,7 +348,11 @@ export function App() {
   };
 
   // Quick Add Connector / Line from Palette or Toolbar
-  const handleAddQuickConnector = (direction: ConnectorDirection = 'directed', routing: ConnectorStyle = 'orthogonal') => {
+  const handleAddQuickConnector = (
+    direction: ConnectorDirection = 'directed',
+    routing: ConnectorStyle = 'orthogonal',
+    isDashed: boolean = false
+  ) => {
     if (!diagram || diagram.elements.length < 2) {
       alert('You need at least 2 shapes on the canvas to add an arrow or line.');
       return;
@@ -306,7 +382,7 @@ export function App() {
         stroke: '#2b3a42',
         stroke_width: 2.0,
         arrow_head: direction === 'undirected' ? 'none' : 'classic',
-        is_dashed: false
+        is_dashed: isDashed
       },
       confidence: 1.0,
       uncertainty_status: 'likely_correct',

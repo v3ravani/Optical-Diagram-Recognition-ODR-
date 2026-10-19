@@ -29,7 +29,19 @@ export type ElementType =
   | 'entity'
   | 'attribute'
   | 'relationship'
-  | 'key_attribute';
+  | 'key_attribute'
+  | 'preparation'
+  | 'manual_operation'
+  | 'off_page_connector'
+  | 'delay'
+  | 'display'
+  | 'merge'
+  | 'cloud'
+  | 'server'
+  | 'queue'
+  | 'card'
+  | 'package'
+  | 'final_state';
 
 export type DiagramFamily =
   | 'flowchart'
