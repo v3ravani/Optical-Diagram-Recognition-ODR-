@@ -52,6 +52,7 @@ Thumbs.db
 *.swo
 
 # Project storage and caches
+data/
 data/projects/*/cache/
 data/temp/
 *.tmp
